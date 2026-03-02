@@ -1,7 +1,6 @@
 import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-
 TOKEN = os.getenv("TOKEN")
 
 waiting_users = []
