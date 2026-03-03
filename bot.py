@@ -38,9 +38,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_chats[user_id] = partner
         active_chats[partner] = user_id
 
-         level = get_level(user_stats.get(user_id, 0))
-         await update.message.reply_text(f"✅ Connected!\n🏆 Your Level: {level}\nSay hi 👋")
-        await context.bot.send_message(partner, "✅ Connected to a stranger! Say hi 👋")
+       level_user = get_level(user_stats.get(user_id, 0))
+       level_partner = get_level(user_stats.get(partner, 0))
+
+     await update.message.reply_text(
+        f"✅ Connected!\n🏆 Your Level: {level_user}\nSay hi 👋"
+        )
+
+     await context.bot.send_message(
+        partner,
+        f"✅ Connected!\n🏆 Your Level: {level_partner}\nSay hi 👋"
+        )
     else:
         waiting_users.append(user_id)
         await update.message.reply_text("⏳ Waiting for a stranger...")
