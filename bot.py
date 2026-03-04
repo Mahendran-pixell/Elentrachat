@@ -1,57 +1,84 @@
-k	mport os
+import os
 import asyncio
-from telegram import Update
+import sqlite3
+import time
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = os.getenv("TOKEN")
 
 waiting_users = []
 active_chats = {}
-user_stats = {}
+message_time = {}
+
+# DATABASE
+conn = sqlite3.connect("elentra.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+user_id INTEGER PRIMARY KEY,
+coins INTEGER DEFAULT 0,
+chats INTEGER DEFAULT 0,
+last_daily INTEGER DEFAULT 0
+)
+""")
+conn.commit()
+
 
 # LEVEL SYSTEM
-def get_level(count):
-    if count >= 31:
+def get_level(chats):
+    if chats >= 30:
         return "👑 Legend"
-    elif count >= 16:
+    elif chats >= 15:
         return "🔥 Chat Pro"
-    elif count >= 6:
+    elif chats >= 5:
         return "💬 Social Starter"
     else:
         return "🌱 Explorer"
 
 
-# WELCOME MESSAGE
-WELCOME_TEXT = """
-👋 Welcome to ElentraChat!
+# MENU
+menu_keyboard = ReplyKeyboardMarkup(
+[
+["🔎 Find Stranger", "👤 Profile"],
+["🎁 Daily Reward", "🏆 Leaderboard"],
+["ℹ️ Help"]
+],
+resize_keyboard=True
+)
+
+
+# START
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.chat_id
+
+    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)",(user_id,))
+    conn.commit()
+
+    await update.message.reply_text(
+"""👋 Welcome to ElentraChat
 
 ✨ Talk anonymously with strangers
-🔒 100% Private & Secure
+🔒 Private & Secure
 ⚡ Instant random matching
 
-Commands:
-/start - find a stranger
-/next - skip current chat
-/stop - end chat
-/online - see active users
-
-Enjoy chatting 💛
-"""
+Use the menu below 👇""",
+reply_markup=menu_keyboard
+)
 
 
-# START COMMAND
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# FIND STRANGER
+async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user_id = update.message.chat_id
 
     await update.message.reply_text("🔎 Searching for someone interesting...")
     await asyncio.sleep(1.5)
 
     if user_id in active_chats:
-        await update.message.reply_text("⚠️ You are already connected. Use /next to skip.")
-        return
-
-    if user_id in waiting_users:
-        await update.message.reply_text("⏳ Still waiting for a stranger...")
+        await update.message.reply_text("⚠️ You are already chatting.")
         return
 
     if waiting_users:
@@ -60,57 +87,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_chats[user_id] = partner
         active_chats[partner] = user_id
 
-        level_user = get_level(user_stats.get(user_id, 0))
-        level_partner = get_level(user_stats.get(partner, 0))
+        cursor.execute("UPDATE users SET chats = chats + 1 WHERE user_id=?",(user_id,))
+        cursor.execute("UPDATE users SET chats = chats + 1 WHERE user_id=?",(partner,))
+        conn.commit()
+
+        chats = cursor.execute("SELECT chats FROM users WHERE user_id=?",(user_id,)).fetchone()[0]
+        level = get_level(chats)
 
         await update.message.reply_text(
-            f"✅ Connected!\n🏆 Your Level: {level_user}\nSay hi 👋"
-        )
+f"✅ Connected!\n🏆 Level: {level}\nSay hi 👋"
+)
 
         await context.bot.send_message(
-            partner,
-            f"✅ Connected!\n🏆 Your Level: {level_partner}\nSay hi 👋"
-        )
+partner,
+"✅ Connected!\nSay hi 👋"
+)
 
     else:
         waiting_users.append(user_id)
         await update.message.reply_text("⏳ Waiting for a stranger...")
 
 
-# NEXT COMMAND
-async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.chat_id
-
-    if user_id in active_chats:
-        partner = active_chats.pop(user_id)
-        active_chats.pop(partner, None)
-
-        user_stats[user_id] = user_stats.get(user_id, 0) + 1
-        user_stats[partner] = user_stats.get(partner, 0) + 1
-
-        await context.bot.send_message(partner, "⚠️ Stranger disconnected.")
-
-    await start(update, context)
-
-
-# STOP COMMAND
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.chat_id
-
-    if user_id in active_chats:
-        partner = active_chats.pop(user_id)
-        active_chats.pop(partner, None)
-
-        await context.bot.send_message(partner, "⚠️ Stranger disconnected.")
-        await update.message.reply_text("❌ You disconnected.")
-
-    else:
-        await update.message.reply_text("⚠️ You are not connected.")
-
-
-# MESSAGE FORWARDING
+# MESSAGE RELAY
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user_id = update.message.chat_id
+
+    # Anti spam
+    now = time.time()
+
+    if user_id in message_time:
+        if now - message_time[user_id] < 1:
+            await update.message.reply_text("⚠️ Slow down.")
+            return
+
+    message_time[user_id] = now
 
     if user_id in active_chats:
         partner = active_chats[user_id]
@@ -118,31 +129,118 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await update.message.copy(chat_id=partner)
         except:
-            await update.message.reply_text("⚠️ Failed to send message.")
+            pass
+
+
+# PROFILE
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.chat_id
+
+    user = cursor.execute(
+    "SELECT coins,chats FROM users WHERE user_id=?",(user_id,)
+    ).fetchone()
+
+    coins,chats = user
+    level = get_level(chats)
+
+    await update.message.reply_text(
+f"""👤 Your Profile
+
+🏆 Level: {level}
+💬 Chats: {chats}
+🪙 Coins: {coins}"""
+)
+
+
+# DAILY
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.chat_id
+
+    last = cursor.execute(
+    "SELECT last_daily FROM users WHERE user_id=?",(user_id,)
+    ).fetchone()[0]
+
+    now = int(time.time())
+
+    if now - last < 86400:
+        await update.message.reply_text("⏳ Come back tomorrow.")
+        return
+
+    cursor.execute(
+    "UPDATE users SET coins = coins + 20, last_daily=? WHERE user_id=?",
+    (now,user_id)
+    )
+
+    conn.commit()
+
+    await update.message.reply_text(
+"🎁 Daily reward claimed!\n🪙 +20 coins"
+)
+
+
+# LEADERBOARD
+async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    top = cursor.execute(
+    "SELECT user_id,chats FROM users ORDER BY chats DESC LIMIT 5"
+    ).fetchall()
+
+    text = "🏆 Top Chatters\n\n"
+
+    rank = 1
+
+    for user in top:
+        text += f"{rank}. {user[0]} — {user[1]} chats\n"
+        rank += 1
+
+    await update.message.reply_text(text)
+
+
+# HELP
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+"""ℹ️ Help
+
+/start - open menu
+🔎 Find Stranger - start chat
+👤 Profile - view stats
+🎁 Daily Reward - get coins
+🏆 Leaderboard - top users"""
+)
+
+
+# BUTTON HANDLER
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    text = update.message.text
+
+    if text == "🔎 Find Stranger":
+        await find(update,context)
+
+    elif text == "👤 Profile":
+        await profile(update,context)
+
+    elif text == "🎁 Daily Reward":
+        await daily(update,context)
+
+    elif text == "🏆 Leaderboard":
+        await leaderboard(update,context)
+
+    elif text == "ℹ️ Help":
+        await help_cmd(update,context)
+
     else:
-        await update.message.reply_text("⚠️ Type /start to find a stranger.")
-
-
-# ONLINE USERS
-async def online(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    total_online = len(waiting_users) + len(active_chats)
-    await update.message.reply_text(f"👥 Users online: {total_online}")
-
-
-# HELP COMMAND
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(WELCOME_TEXT)
+        await handle_message(update,context)
 
 
 # BUILD BOT
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("next", next_chat))
-app.add_handler(CommandHandler("stop", stop))
-app.add_handler(CommandHandler("online", online))
-app.add_handler(CommandHandler("help", help_command))
+app.add_handler(CommandHandler("start",start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,buttons))
 
-app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
-
+print("Bot running...")
 app.run_polling()
