@@ -1,4 +1,4 @@
-import os
+k	mport os
 import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -19,6 +19,24 @@ def get_level(count):
         return "💬 Social Starter"
     else:
         return "🌱 Explorer"
+
+
+# WELCOME MESSAGE
+WELCOME_TEXT = """
+👋 Welcome to ElentraChat!
+
+✨ Talk anonymously with strangers
+🔒 100% Private & Secure
+⚡ Instant random matching
+
+Commands:
+/start - find a stranger
+/next - skip current chat
+/stop - end chat
+/online - see active users
+
+Enjoy chatting 💛
+"""
 
 
 # START COMMAND
@@ -90,7 +108,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ You are not connected.")
 
 
-# MESSAGE HANDLER
+# MESSAGE FORWARDING
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
@@ -111,6 +129,11 @@ async def online(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"👥 Users online: {total_online}")
 
 
+# HELP COMMAND
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(WELCOME_TEXT)
+
+
 # BUILD BOT
 app = ApplicationBuilder().token(TOKEN).build()
 
@@ -118,6 +141,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("next", next_chat))
 app.add_handler(CommandHandler("stop", stop))
 app.add_handler(CommandHandler("online", online))
+app.add_handler(CommandHandler("help", help_command))
 
 app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
 
