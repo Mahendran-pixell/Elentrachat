@@ -59,7 +59,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Waiting for a stranger...")
 
 
-# NEXT COMMAND (SKIP)
+# NEXT COMMAND
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
@@ -90,7 +90,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ You are not connected.")
 
 
-# MESSAGE FORWARDING
+# MESSAGE HANDLER
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
@@ -105,13 +105,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Type /start to find a stranger.")
 
 
-# ONLINE USERS COUNT
+# ONLINE USERS
 async def online(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_online = len(waiting_users) + len(active_chats)
     await update.message.reply_text(f"👥 Users online: {total_online}")
 
 
-# BUILD APP
+# BUILD BOT
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
