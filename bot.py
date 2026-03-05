@@ -3,7 +3,7 @@ import asyncio
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
 ADMIN_ID = 123456789
 
 # DATABASE
