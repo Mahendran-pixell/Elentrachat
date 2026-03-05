@@ -14,7 +14,6 @@ CREATE TABLE IF NOT EXISTS users(
 user_id INTEGER PRIMARY KEY
 )
 """)
-
 conn.commit()
 
 waiting_users = []
@@ -28,7 +27,7 @@ menu_keyboard = [
 
 menu = ReplyKeyboardMarkup(menu_keyboard, resize_keyboard=True)
 
-# start
+# START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -46,7 +45,7 @@ Choose an option 👇""",
 reply_markup=menu
 )
 
-# find partner
+# FIND PARTNER
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -70,7 +69,7 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         asyncio.create_task(wait_messages(user,context))
 
-# waiting engagement
+# WAIT MESSAGES
 async def wait_messages(user,context):
 
     await asyncio.sleep(15)
@@ -93,7 +92,7 @@ async def wait_messages(user,context):
 Tap 🔎 Find Stranger to meet them."""
 )
 
-# stop chat
+# STOP CHAT
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -109,7 +108,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("Chat ended.")
 
-# relay messages
+# RELAY MESSAGES
 async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -124,7 +123,7 @@ async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_id=update.message.message_id
         )
 
-# profile
+# PROFILE
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
@@ -135,7 +134,7 @@ Status: Free user
 Upgrade to 💎 Premium for faster matches."""
 )
 
-# premium page
+# PREMIUM PAGE
 async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
@@ -148,7 +147,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Contact admin to activate."""
 )
 
-# admin stats
+# ADMIN STATS
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.effective_user.id != ADMIN_ID:
@@ -164,7 +163,7 @@ Waiting: {len(waiting_users)}
 Active chats: {len(active_chats)//2}"""
 )
 
-# reminder broadcast
+# REMINDER LOOP
 async def reminder_loop(app):
 
     while True:
@@ -191,7 +190,12 @@ Tap /start to chat."""
             except:
                 pass
 
-# buttons
+# START REMINDER AFTER BOT STARTS
+async def post_init(app):
+
+    asyncio.create_task(reminder_loop(app))
+
+# BUTTON HANDLER
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
@@ -210,7 +214,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 "Use 🔎 Find Stranger to start chatting.\nType /stop to leave chat."
 )
 
-app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
 app.add_handler(CommandHandler("start",start))
 app.add_handler(CommandHandler("stop",stop))
@@ -219,8 +223,9 @@ app.add_handler(CommandHandler("stats",stats))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,buttons))
 app.add_handler(MessageHandler(filters.ALL,relay))
 
-app.create_task(reminder_loop(app))
-
 print("ElentraChat V14 running 🚀")
 
 app.run_polling()
+
+
+
