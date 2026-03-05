@@ -6,7 +6,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 TOKEN = "8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
 ADMIN_ID = 123456789
 
-# Database
 conn = sqlite3.connect("elentra.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -16,7 +15,6 @@ user_id INTEGER PRIMARY KEY,
 premium INTEGER DEFAULT 0
 )
 """)
-
 conn.commit()
 
 waiting_users = []
@@ -25,7 +23,7 @@ active_chats = {}
 menu_keyboard = [
 ["🔎 Find Stranger"],
 ["👤 Profile","💎 Premium"],
-["📊 Stats","ℹ️ Help"]
+["ℹ️ Help"]
 ]
 
 menu = ReplyKeyboardMarkup(menu_keyboard, resize_keyboard=True)
@@ -41,9 +39,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
 """👋 Welcome to ElentraChat
 
-✨ Anonymous chat
-🔒 Private conversations
-🔥 Meet new people instantly
+✨ Anonymous random chat
+🔒 Private & secure
 
 Choose an option below 👇""",
 reply_markup=menu
@@ -54,13 +51,7 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
-    if user in waiting_users:
-        return
-
-    await update.message.reply_text("🔎 Searching for someone interesting...")
-
     if waiting_users:
-
         partner = waiting_users.pop(0)
 
         active_chats[user] = partner
@@ -70,9 +61,9 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
 
     else:
-
         waiting_users.append(user)
 
+        await update.message.reply_text("🔎 Searching for someone interesting...")
         await update.message.reply_text("⏳ Waiting for a partner...")
 
         context.application.create_task(wait_messages(user,context))
@@ -85,9 +76,9 @@ async def wait_messages(user,context):
     if user in waiting_users:
         await context.bot.send_message(
         user,
-"""🔥 Many people are chatting right now!
+"""👀 Someone is searching for a chat too...
 
-💎 Premium users get priority matching."""
+💎 Premium users get faster matches."""
 )
 
     await asyncio.sleep(20)
@@ -95,15 +86,9 @@ async def wait_messages(user,context):
     if user in waiting_users:
         await context.bot.send_message(
         user,
-"""🎁 Special Offer
+"""🔥 Many people are chatting right now!
 
-Upgrade to Premium and unlock:
-
-✨ Faster matching
-💬 Unlimited chats
-🌍 Country filters
-
-Press 💎 Premium"""
+Tap 🔎 Find Stranger to meet someone interesting."""
 )
 
 # Stop Chat
@@ -124,7 +109,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("You are not in a chat.")
 
-# Relay messages
+# Relay
 async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -155,7 +140,7 @@ f"""👤 Your Profile
 
 Premium: {premium}
 
-Upgrade to unlock more features."""
+Upgrade for faster matching."""
 )
 
 # Premium
@@ -164,20 +149,19 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
 """💎 Premium Subscription
 
-✨ Unlimited chats
-⚡ Faster matches
-🌍 Country filters
-🚫 No limits
-
-Price: $2 / month
+✨ Faster matching
+💬 Unlimited chats
+🌍 Future filters
 
 Contact admin to activate."""
 )
 
-# Stats
+# Admin stats
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if update.effective_user.id != ADMIN_ID:
+    user = update.effective_user.id
+
+    if user != ADMIN_ID:
         return
 
     total = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -191,6 +175,27 @@ Users: {total}
 Waiting: {waiting}
 Active chats: {chats}"""
 )
+
+# Inactive broadcast
+async def reminder(context: ContextTypes.DEFAULT_TYPE):
+
+    users = cursor.execute("SELECT user_id FROM users").fetchall()
+
+    for u in users:
+
+        try:
+            await context.bot.send_message(
+            u[0],
+"""👋 Hey!
+
+💬 People are waiting for you on ElentraChat.
+
+🔥 Someone interesting might be online now!
+
+Tap /start and meet them."""
+)
+        except:
+            pass
 
 # Button handler
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -206,26 +211,25 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "💎 Premium":
         await premium(update,context)
 
-    elif text == "📊 Stats":
-        await stats(update,context)
-
     elif text == "ℹ️ Help":
         await update.message.reply_text(
-"""Use 🔎 Find Stranger to start chatting.
-
-Type /stop to leave a chat."""
+"Use 🔎 Find Stranger to start chatting.\nType /stop to leave chat."
 )
 
-# App
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
 app.add_handler(CommandHandler("stop",stop))
+app.add_handler(CommandHandler("stats",stats))
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,buttons))
 app.add_handler(MessageHandler(filters.ALL,relay))
 
-print("ElentraChat V12 running 🚀")
+# Reminder every 6 hours
+job_queue = app.job_queue
+job_queue.run_repeating(reminder, interval=21600, first=60)
+
+print("ElentraChat V13 running 🚀")
 
 app.run_polling()	
 
