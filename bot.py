@@ -11,10 +11,10 @@ cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users(
-user_id INTEGER PRIMARY KEY,
-premium INTEGER DEFAULT 0
+user_id INTEGER PRIMARY KEY
 )
 """)
+
 conn.commit()
 
 waiting_users = []
@@ -28,12 +28,12 @@ menu_keyboard = [
 
 menu = ReplyKeyboardMarkup(menu_keyboard, resize_keyboard=True)
 
-# Start
+# start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
-    cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)",(user,))
+    cursor.execute("INSERT OR IGNORE INTO users VALUES(?)",(user,))
     conn.commit()
 
     await update.message.reply_text(
@@ -42,16 +42,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ✨ Anonymous random chat
 🔒 Private & secure
 
-Choose an option below 👇""",
+Choose an option 👇""",
 reply_markup=menu
 )
 
-# Find Stranger
+# find partner
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
     if waiting_users:
+
         partner = waiting_users.pop(0)
 
         active_chats[user] = partner
@@ -61,14 +62,15 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
 
     else:
+
         waiting_users.append(user)
 
         await update.message.reply_text("🔎 Searching for someone interesting...")
-        await update.message.reply_text("⏳ Waiting for a partner...")
+        await update.message.reply_text("⏳ Waiting for partner...")
 
-        context.application.create_task(wait_messages(user,context))
+        asyncio.create_task(wait_messages(user,context))
 
-# Waiting engagement messages
+# waiting engagement
 async def wait_messages(user,context):
 
     await asyncio.sleep(15)
@@ -76,7 +78,7 @@ async def wait_messages(user,context):
     if user in waiting_users:
         await context.bot.send_message(
         user,
-"""👀 Someone is searching for a chat too...
+"""👀 Someone else is searching too...
 
 💎 Premium users get faster matches."""
 )
@@ -88,10 +90,10 @@ async def wait_messages(user,context):
         user,
 """🔥 Many people are chatting right now!
 
-Tap 🔎 Find Stranger to meet someone interesting."""
+Tap 🔎 Find Stranger to meet them."""
 )
 
-# Stop Chat
+# stop chat
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -104,12 +106,10 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del active_chats[partner]
 
         await context.bot.send_message(partner,"❌ Your partner disconnected.")
+
         await update.message.reply_text("Chat ended.")
 
-    else:
-        await update.message.reply_text("You are not in a chat.")
-
-# Relay
+# relay messages
 async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -124,26 +124,18 @@ async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_id=update.message.message_id
         )
 
-# Profile
+# profile
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user.id
-
-    data = cursor.execute(
-    "SELECT premium FROM users WHERE user_id=?",(user,)
-    ).fetchone()
-
-    premium = "Yes 💎" if data[0] else "No"
-
     await update.message.reply_text(
-f"""👤 Your Profile
+"""👤 Your Profile
 
-Premium: {premium}
+Status: Free user
 
-Upgrade for faster matching."""
+Upgrade to 💎 Premium for faster matches."""
 )
 
-# Premium
+# premium page
 async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
@@ -156,48 +148,50 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Contact admin to activate."""
 )
 
-# Admin stats
+# admin stats
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user.id
-
-    if user != ADMIN_ID:
+    if update.effective_user.id != ADMIN_ID:
         return
 
     total = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    waiting = len(waiting_users)
-    chats = len(active_chats)//2
 
     await update.message.reply_text(
 f"""📊 Bot Stats
 
 Users: {total}
-Waiting: {waiting}
-Active chats: {chats}"""
+Waiting: {len(waiting_users)}
+Active chats: {len(active_chats)//2}"""
 )
 
-# Inactive broadcast
-async def reminder(context: ContextTypes.DEFAULT_TYPE):
+# reminder broadcast
+async def reminder_loop(app):
 
-    users = cursor.execute("SELECT user_id FROM users").fetchall()
+    while True:
 
-    for u in users:
+        await asyncio.sleep(21600)
 
-        try:
-            await context.bot.send_message(
-            u[0],
+        users = cursor.execute("SELECT user_id FROM users").fetchall()
+
+        for u in users:
+
+            try:
+
+                await app.bot.send_message(
+                u[0],
 """👋 Hey!
 
 💬 People are waiting for you on ElentraChat.
 
 🔥 Someone interesting might be online now!
 
-Tap /start and meet them."""
+Tap /start to chat."""
 )
-        except:
-            pass
 
-# Button handler
+            except:
+                pass
+
+# buttons
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
@@ -225,11 +219,8 @@ app.add_handler(CommandHandler("stats",stats))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,buttons))
 app.add_handler(MessageHandler(filters.ALL,relay))
 
-# Reminder every 6 hours
-job_queue = app.job_queue
-job_queue.run_repeating(reminder, interval=21600, first=60)
+app.create_task(reminder_loop(app))
 
-print("ElentraChat V13 running 🚀")
+print("ElentraChat V14 running 🚀")
 
-app.run_polling()	
-
+app.run_polling()
