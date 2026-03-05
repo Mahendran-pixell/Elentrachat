@@ -13,40 +13,36 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users(
 user_id INTEGER PRIMARY KEY,
-gender TEXT,
+name TEXT,
+age INTEGER,
 country TEXT,
+gender TEXT,
+partner_gender TEXT,
 vip INTEGER DEFAULT 0,
 coins INTEGER DEFAULT 10,
 agreed INTEGER DEFAULT 0
 )
 """)
+
 conn.commit()
 
 waiting_users = []
 active_chats = {}
 
-menu_keyboard = [
+menu = ReplyKeyboardMarkup([
 ["🔎 Find Stranger"],
-["👤 Profile","💎 VIP"],
-["🌍 Set Country","👦 Gender"],
-["📜 Terms","ℹ️ Help"]
-]
-
-menu = ReplyKeyboardMarkup(menu_keyboard, resize_keyboard=True)
+["👤 Profile","✏️ Edit Profile"],
+["🎯 Partner Gender","🌍 Country"],
+["💎 VIP","📜 Terms"]
+],resize_keyboard=True)
 
 terms = """
-📜 ElentraChat Rules
+📜 Terms & Privacy
 
-🔒 Privacy
-Chats are anonymous.
-
-🚫 Forbidden
-Spam
-Harassment
-Illegal content
-
-⚠️ Safety
-Do not share personal info.
+• Chats are anonymous
+• Do not share personal information
+• No harassment or illegal content
+• Respect other users
 
 Type /agree to continue.
 """
@@ -70,7 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 reply_markup=menu
 )
 
-# AGREE TERMS
+# AGREE
 async def agree(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -78,12 +74,87 @@ async def agree(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("UPDATE users SET agreed=1 WHERE user_id=?",(user,))
     conn.commit()
 
+    await update.message.reply_text("✅ Rules accepted!",reply_markup=menu)
+
+# PROFILE
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
+
+    data = cursor.execute(
+    "SELECT name,age,country,gender,partner_gender,coins,vip FROM users WHERE user_id=?",(user,)
+    ).fetchone()
+
+    name,age,country,gender,partner,coins,vip = data
+
+    status = "VIP 💎" if vip else "Free"
+
     await update.message.reply_text(
-"✅ Rules accepted. Start chatting!",
-reply_markup=menu
+f"""👤 Your Profile
+
+Name: {name}
+Age: {age}
+Country: {country}
+Gender: {gender}
+Looking for: {partner}
+
+Coins: {coins}
+Status: {status}
+"""
 )
 
-# FIND STRANGER
+# EDIT PROFILE
+async def edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+"Send profile like:\nName,Age,Country,Gender"
+)
+
+# SAVE PROFILE
+async def save_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
+
+    try:
+
+        name,age,country,gender = update.message.text.split(",")
+
+        cursor.execute(
+        "UPDATE users SET name=?,age=?,country=?,gender=? WHERE user_id=?",
+        (name,int(age),country,gender,user)
+        )
+
+        conn.commit()
+
+        await update.message.reply_text("✅ Profile saved")
+
+    except:
+        pass
+
+# SET PARTNER GENDER
+async def partner_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+"Send preferred partner gender:\nMale / Female / Any"
+)
+
+# SAVE PARTNER
+async def save_partner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
+
+    gender = update.message.text
+
+    cursor.execute(
+    "UPDATE users SET partner_gender=? WHERE user_id=?",
+    (gender,user)
+    )
+
+    conn.commit()
+
+    await update.message.reply_text("🎯 Partner preference saved")
+
+# FIND CHAT
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -102,9 +173,9 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         waiting_users.append(user)
 
-        await update.message.reply_text("🔎 Searching for someone...")
+        await update.message.reply_text("🔎 Searching...")
 
-# STOP CHAT
+# STOP
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -116,10 +187,10 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del active_chats[user]
         del active_chats[partner]
 
-        await context.bot.send_message(partner,"❌ Partner left chat")
+        await context.bot.send_message(partner,"❌ Partner left")
         await update.message.reply_text("Chat ended")
 
-# RELAY MESSAGES
+# RELAY
 async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
@@ -129,74 +200,26 @@ async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         partner = active_chats[user]
 
         await context.bot.copy_message(
-            chat_id=partner,
-            from_chat_id=user,
-            message_id=update.message.message_id
+        chat_id=partner,
+        from_chat_id=user,
+        message_id=update.message.message_id
         )
 
-# PROFILE
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user = update.effective_user.id
-
-    data = cursor.execute(
-        "SELECT coins,vip FROM users WHERE user_id=?",(user,)
-    ).fetchone()
-
-    coins,vip = data
-
-    status = "VIP 💎" if vip else "Free"
-
-    await update.message.reply_text(
-f"""👤 Profile
-
-Status: {status}
-Coins: {coins}"""
-)
-
-# VIP PAGE
+# VIP
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-"""💎 VIP Membership
+"""💎 VIP
 
-Benefits:
+Benefits
 
 ⚡ Faster matches
+🌍 Country filter
+🎯 Gender filter
 💬 Unlimited chats
-🎯 Filters
 
 Contact admin to activate."""
 )
-
-# SET COUNTRY
-async def set_country(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(
-"🌍 Send your country name."
-)
-
-# SET GENDER
-async def gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(
-"👦 Send your gender (male/female)"
-)
-
-# HELP
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(
-"""ℹ️ Help
-
-🔎 Find Stranger → chat
-/stop → leave chat"""
-)
-
-# TERMS BUTTON
-async def show_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    await update.message.reply_text(terms)
 
 # ADMIN STATS
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -207,15 +230,16 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
     await update.message.reply_text(
-f"""📊 Bot Stats
+f"""📊 Stats
 
 Users: {total}
 Waiting: {len(waiting_users)}
-Active chats: {len(active_chats)//2}"""
+Active chats: {len(active_chats)//2}
+"""
 )
 
-# REMINDER LOOP
-async def reminder_loop(app):
+# REMINDER
+async def reminder(app):
 
     while True:
 
@@ -229,21 +253,16 @@ async def reminder_loop(app):
 
                 await app.bot.send_message(
                 u[0],
-"""👋 Someone is waiting for you on ElentraChat!
-
-💬 New people joined today.
-
-Tap /start to chat."""
-)
+"👋 People are waiting for you on ElentraChat!\nTap /start"
+                )
 
             except:
                 pass
 
-# POST INIT
 async def post_init(app):
-    asyncio.create_task(reminder_loop(app))
+    asyncio.create_task(reminder(app))
 
-# BUTTON HANDLER
+# BUTTONS
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
@@ -254,22 +273,18 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "👤 Profile":
         await profile(update,context)
 
+    elif text == "✏️ Edit Profile":
+        await edit(update,context)
+
+    elif text == "🎯 Partner Gender":
+        await partner_gender(update,context)
+
     elif text == "💎 VIP":
         await vip(update,context)
 
-    elif text == "🌍 Set Country":
-        await set_country(update,context)
-
-    elif text == "👦 Gender":
-        await gender(update,context)
-
     elif text == "📜 Terms":
-        await show_terms(update,context)
+        await update.message.reply_text(terms)
 
-    elif text == "ℹ️ Help":
-        await help_cmd(update,context)
-
-# APP
 app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
 app.add_handler(CommandHandler("start",start))
@@ -278,8 +293,9 @@ app.add_handler(CommandHandler("stop",stop))
 app.add_handler(CommandHandler("stats",stats))
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,buttons))
+app.add_handler(MessageHandler(filters.TEXT,save_profile))
 app.add_handler(MessageHandler(filters.ALL,relay))
 
-print("ElentraChat V16 running 🚀")
+print("ElentraChat V17 running 🚀")
 
 app.run_polling()
