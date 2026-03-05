@@ -6,7 +6,8 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = 8232389772
+
+ADMIN_IDS = [8232389772]
 
 conn = sqlite3.connect("elentra.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -18,7 +19,8 @@ coins INTEGER DEFAULT 50,
 vip INTEGER DEFAULT 0,
 likes INTEGER DEFAULT 0,
 reports INTEGER DEFAULT 0,
-banned INTEGER DEFAULT 0
+banned INTEGER DEFAULT 0,
+last_daily INTEGER DEFAULT 0
 )
 """)
 
@@ -30,12 +32,14 @@ active_chats = {}
 MAIN_MENU = ReplyKeyboardMarkup([
 ["🔎 Find Stranger","👤 Profile"],
 ["🎁 Daily Coins","🏆 Leaderboard"],
-["👥 Invite Friends","⚠️ Report"]
+["👥 Invite Friends","💎 VIP"],
+["⚠️ Report"]
 ],resize_keyboard=True)
 
 RATING_MENU = ReplyKeyboardMarkup([
 ["👍 Good User","👎 Bad User"]
 ],resize_keyboard=True)
+
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
@@ -47,10 +51,12 @@ async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
     ).fetchone()
 
     if not user:
+
         cursor.execute(
         "INSERT INTO users(user_id) VALUES(?)",
         (user_id,)
         )
+
         conn.commit()
 
     banned = cursor.execute(
@@ -64,14 +70,15 @@ async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
 """
-👋 Welcome to ElentraChat V8
+👋 Welcome to ElentraChat
 
-🔐 Anonymous chat
-⚡ Instant matching
+Anonymous random chat
+Find new people instantly
 
 Choose option 👇
 """,
 reply_markup=MAIN_MENU)
+
 
 async def find(update,context):
 
@@ -98,6 +105,7 @@ async def find(update,context):
 
         await update.message.reply_text("⏳ Waiting for stranger...")
 
+
 async def relay(update,context):
 
     user_id = update.message.chat_id
@@ -110,6 +118,7 @@ async def relay(update,context):
             await update.message.copy(partner)
         except:
             pass
+
 
 async def next_chat(update,context):
 
@@ -131,6 +140,7 @@ async def next_chat(update,context):
         "⭐ Rate the user",
         reply_markup=RATING_MENU)
 
+
 async def stop(update,context):
 
     user_id = update.message.chat_id
@@ -150,6 +160,7 @@ async def stop(update,context):
     await update.message.reply_text(
     "⭐ Rate the user",
     reply_markup=RATING_MENU)
+
 
 async def rating(update,context):
 
@@ -176,6 +187,7 @@ async def rating(update,context):
     "Thanks for feedback!",
     reply_markup=MAIN_MENU)
 
+
 async def profile(update,context):
 
     user_id = update.message.chat_id
@@ -187,86 +199,123 @@ async def profile(update,context):
 
     coins,vip,likes,reports = data
 
+    vip_status = "💎 Yes" if vip else "❌ No"
+
     await update.message.reply_text(
 f"""
 👤 Profile
 
 💰 Coins: {coins}
-💎 VIP: {"Yes" if vip else "No"}
+💎 VIP: {vip_status}
 👍 Likes: {likes}
 👎 Reports: {reports}
 """)
+
+
+async def vip_info(update,context):
+
+    await update.message.reply_text(
+"""
+💎 VIP Membership
+
+Early Supporter Price: $2
+
+VIP Benefits
+
+• Unlimited chats
+• VIP badge
+• Priority matching
+
+Contact admin to activate VIP.
+"""
+)
+
+
+async def vip_user(update,context):
+
+    if update.message.chat_id not in ADMIN_IDS:
+        return
+
+    try:
+        user = int(context.args[0])
+    except:
+        await update.message.reply_text("Usage: /vip USER_ID")
+        return
+
+    cursor.execute(
+    "UPDATE users SET vip=1 WHERE user_id=?",
+    (user,)
+    )
+
+    conn.commit()
+
+    await update.message.reply_text(
+    f"VIP activated for {user}")
+
+
+async def daily(update,context):
+
+    user_id = update.message.chat_id
+
+    data = cursor.execute(
+    "SELECT last_daily FROM users WHERE user_id=?",
+    (user_id,)
+    ).fetchone()
+
+    now = int(time.time())
+
+    if now - data[0] < 86400:
+
+        await update.message.reply_text(
+        "Daily reward already claimed.")
+        return
+
+    cursor.execute(
+    "UPDATE users SET coins = coins + 20,last_daily=? WHERE user_id=?",
+    (now,user_id)
+    )
+
+    conn.commit()
+
+    await update.message.reply_text(
+    "🎁 You received 20 coins!")
+
 
 async def report(update,context):
 
     user_id = update.message.chat_id
 
-    await context.bot.send_message(
-    ADMIN_ID,
-f"⚠️ Report received from user {user_id}")
+    for admin in ADMIN_IDS:
+
+        await context.bot.send_message(
+        admin,
+        f"⚠️ Report received from {user_id}")
 
     await update.message.reply_text(
     "Report sent to admin.")
 
+
 async def stats(update,context):
 
-    if update.message.chat_id != ADMIN_ID:
+    if update.message.chat_id not in ADMIN_IDS:
         return
 
     total = cursor.execute(
     "SELECT COUNT(*) FROM users"
     ).fetchone()[0]
 
-    banned = cursor.execute(
-    "SELECT COUNT(*) FROM users WHERE banned=1"
-    ).fetchone()[0]
-
     await update.message.reply_text(
 f"""
 📊 Bot Stats
 
-👥 Total users: {total}
-🚫 Banned users: {banned}
-💬 Active chats: {len(active_chats)//2}
+Users: {total}
+Active chats: {len(active_chats)//2}
 """)
 
-async def ban(update,context):
-
-    if update.message.chat_id != ADMIN_ID:
-        return
-
-    user = int(context.args[0])
-
-    cursor.execute(
-    "UPDATE users SET banned=1 WHERE user_id=?",
-    (user,)
-    )
-
-    conn.commit()
-
-    await update.message.reply_text(
-    f"User {user} banned.")
-
-async def unban(update,context):
-
-    if update.message.chat_id != ADMIN_ID:
-        return
-
-    user = int(context.args[0])
-
-    cursor.execute(
-    "UPDATE users SET banned=0 WHERE user_id=?",
-    (user,)
-    )
-
-    conn.commit()
-
-    await update.message.reply_text(
-    f"User {user} unbanned.")
 
 async def broadcast(update,context):
 
-    if update.message.chat_id != ADMIN_ID:
+    if update.message.chat_id not in ADMIN_IDS:
         return
 
     msg = " ".join(context.args)
@@ -278,6 +327,7 @@ async def broadcast(update,context):
     count = 0
 
     for u in users:
+
         try:
             await context.bot.send_message(u[0],msg)
             count += 1
@@ -285,7 +335,8 @@ async def broadcast(update,context):
             pass
 
     await update.message.reply_text(
-    f"Broadcast sent to {count} users.")
+    f"Broadcast sent to {count} users")
+
 
 async def menu(update,context):
 
@@ -297,6 +348,12 @@ async def menu(update,context):
     elif text == "👤 Profile":
         await profile(update,context)
 
+    elif text == "🎁 Daily Coins":
+        await daily(update,context)
+
+    elif text == "💎 VIP":
+        await vip_info(update,context)
+
     elif text == "⚠️ Report":
         await report(update,context)
 
@@ -306,19 +363,18 @@ async def menu(update,context):
     else:
         await relay(update,context)
 
+
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
 app.add_handler(CommandHandler("next",next_chat))
 app.add_handler(CommandHandler("stop",stop))
 app.add_handler(CommandHandler("stats",stats))
-app.add_handler(CommandHandler("ban",ban))
-app.add_handler(CommandHandler("unban",unban))
 app.add_handler(CommandHandler("broadcast",broadcast))
+app.add_handler(CommandHandler("vip",vip_user))
 
 app.add_handler(MessageHandler(filters.TEXT,menu))
 
-print("ElentraChat V8 running")
+print("ElentraChat running...")
 
-app.run_polling()	
-
+app.run_polling()
