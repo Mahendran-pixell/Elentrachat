@@ -6,16 +6,18 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 TOKEN = os.getenv("TOKEN")
+ADMIN_ID = 8232389772
 
-# QUEUES
+# Queues
 boys_queue = []
 girls_queue = []
 random_queue = []
 
 active_chats = {}
+online_users = set()
 message_time = {}
 
-# DATABASE
+# Database
 conn = sqlite3.connect("elentra.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -30,7 +32,7 @@ last_daily INTEGER DEFAULT 0
 """)
 conn.commit()
 
-# LEVEL
+# LEVEL SYSTEM
 def get_level(chats):
     if chats >= 40:
         return "👑 Legend"
@@ -40,7 +42,6 @@ def get_level(chats):
         return "💬 Social Starter"
     else:
         return "🌱 Explorer"
-
 
 # MENUS
 main_menu = ReplyKeyboardMarkup(
@@ -63,6 +64,7 @@ resize_keyboard=True
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     user_id = update.message.chat_id
+    online_users.add(user_id)
 
     cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)",(user_id,))
     conn.commit()
@@ -77,7 +79,7 @@ Choose an option 👇""",
 reply_markup=main_menu
 )
 
-# SELECT GENDER
+# CHOOSE GENDER
 async def choose_gender(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
@@ -85,7 +87,7 @@ async def choose_gender(update:Update,context:ContextTypes.DEFAULT_TYPE):
 reply_markup=gender_menu
 )
 
-# MATCHING LOGIC
+# MATCH USER
 async def match_user(user_id,queue,update,context):
 
     await update.message.reply_text("🔎 Searching for someone interesting...")
@@ -118,7 +120,9 @@ async def match_user(user_id,queue,update,context):
 f"""✅ Connected!
 
 🏆 Level: {level}
-Say hi 👋"""
+Say hi 👋
+Use /next to skip
+Use /stop to end chat"""
 )
 
         await context.bot.send_message(
@@ -130,11 +134,11 @@ Say hi 👋"""
         queue.append(user_id)
         await update.message.reply_text("⏳ Waiting for a stranger...")
 
-
 # MESSAGE RELAY
 async def relay(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     user_id = update.message.chat_id
+    online_users.add(user_id)
 
     now = time.time()
 
@@ -153,6 +157,40 @@ async def relay(update:Update,context:ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
+# NEXT
+async def next_chat(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.chat_id
+
+    if user_id in active_chats:
+
+        partner = active_chats[user_id]
+
+        active_chats.pop(user_id,None)
+        active_chats.pop(partner,None)
+
+        await context.bot.send_message(partner,"⚠️ Stranger skipped chat.")
+        await update.message.reply_text("🔎 Searching for next stranger...")
+
+        await choose_gender(update,context)
+
+# STOP
+async def stop_chat(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.chat_id
+
+    if user_id in active_chats:
+
+        partner = active_chats[user_id]
+
+        active_chats.pop(user_id,None)
+        active_chats.pop(partner,None)
+
+        await context.bot.send_message(partner,"⚠️ Stranger disconnected.")
+        await update.message.reply_text("❌ Chat ended.",reply_markup=main_menu)
+
+    else:
+        await update.message.reply_text("You are not in a chat.",reply_markup=main_menu)
 
 # PROFILE
 async def profile(update:Update,context:ContextTypes.DEFAULT_TYPE):
@@ -165,7 +203,6 @@ async def profile(update:Update,context:ContextTypes.DEFAULT_TYPE):
     ).fetchone()
 
     coins,chats,refs = user
-
     level = get_level(chats)
 
     await update.message.reply_text(
@@ -210,7 +247,6 @@ async def leaderboard(update:Update,context:ContextTypes.DEFAULT_TYPE):
     text = "🏆 Top Users\n\n"
 
     rank = 1
-
     for u in top:
         text += f"{rank}. {u[0]} — {u[1]} chats\n"
         rank += 1
@@ -243,9 +279,31 @@ async def help_cmd(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
 /start — open menu
 🔎 Find Stranger — start chat
-👤 Profile — view stats
-🎁 Daily Coins — reward
-🏆 Leaderboard — top users"""
+/next — skip chat
+/stop — end chat"""
+)
+
+# ADMIN STATS
+async def stats(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.message.chat_id
+
+    if user_id != ADMIN_ID:
+        return
+
+    total_users = cursor.execute(
+    "SELECT COUNT(*) FROM users"
+    ).fetchone()[0]
+
+    online = len(online_users)
+    active = len(active_chats)//2
+
+    await update.message.reply_text(
+f"""📊 Bot Statistics
+
+👥 Total users: {total_users}
+🟢 Online users: {online}
+💬 Active chats: {active}"""
 )
 
 # BUTTON HANDLER
@@ -284,14 +342,17 @@ async def buttons(update:Update,context:ContextTypes.DEFAULT_TYPE):
     else:
         await relay(update,context)
 
-
 # RUN BOT
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
+app.add_handler(CommandHandler("next",next_chat))
+app.add_handler(CommandHandler("stop",stop_chat))
+app.add_handler(CommandHandler("stats",stats))
+
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,buttons))
 
-print("ElentraChat v4 running...")
+print("ElentraChat v5 running...")
 
-app.run_polling()
+app.run_polling()	
 
