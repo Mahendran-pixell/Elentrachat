@@ -1,6 +1,6 @@
 import os
-import asyncio
 import sqlite3
+import asyncio
 import time
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -8,46 +8,38 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID = 8232389772
 
-boys_queue = []
-girls_queue = []
-random_queue = []
-
-active_chats = {}
-online_users = set()
-
-photo_timer = {}
-
 conn = sqlite3.connect("elentra.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users(
 user_id INTEGER PRIMARY KEY,
-name TEXT,
-age INTEGER,
-country TEXT,
-gender TEXT,
-looking TEXT,
-coins INTEGER DEFAULT 0,
-chats INTEGER DEFAULT 0,
-last_daily INTEGER DEFAULT 0
+coins INTEGER DEFAULT 50,
+vip INTEGER DEFAULT 0,
+chats_today INTEGER DEFAULT 0,
+last_daily INTEGER DEFAULT 0,
+referrals INTEGER DEFAULT 0
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS referrals(
+user_id INTEGER,
+ref_by INTEGER
 )
 """)
 
 conn.commit()
 
-main_menu = ReplyKeyboardMarkup([
+waiting_users = []
+active_chats = {}
+online_users = set()
+
+MAIN_MENU = ReplyKeyboardMarkup([
 ["🔎 Find Stranger","👤 Profile"],
-["🎁 Daily Coins","⏱ Photo Timer"],
-["🌍 Country Filter","ℹ️ Help"]
-],resize_keyboard=True)
-
-gender_menu = ReplyKeyboardMarkup([
-["👦 Boy","👧 Girl","🌍 Random"]
-],resize_keyboard=True)
-
-timer_menu = ReplyKeyboardMarkup([
-["5 sec","10 sec","20 sec"]
+["🎁 Daily Coins","🏆 Leaderboard"],
+["🌍 Country Shop","💎 VIP"],
+["👥 Invite Friends","⚠️ Report"]
 ],resize_keyboard=True)
 
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
@@ -55,102 +47,90 @@ async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
     online_users.add(user_id)
 
+    args = context.args
+
     user = cursor.execute(
-    "SELECT name FROM users WHERE user_id=?",(user_id,)
+    "SELECT user_id FROM users WHERE user_id=?",
+    (user_id,)
     ).fetchone()
 
     if not user:
-        cursor.execute("INSERT INTO users(user_id) VALUES(?)",(user_id,))
+        cursor.execute(
+        "INSERT INTO users(user_id) VALUES(?)",
+        (user_id,)
+        )
         conn.commit()
 
-        await update.message.reply_text(
-        "Welcome! Let's setup your profile.\nSend your name:")
-        context.user_data["setup"]="name"
-        return
+        if args:
+            ref = int(args[0])
+
+            if ref != user_id:
+
+                cursor.execute(
+                "INSERT INTO referrals VALUES(?,?)",
+                (user_id,ref)
+                )
+
+                cursor.execute(
+                "UPDATE users SET coins = coins + 20 WHERE user_id=?",
+                (ref,)
+                )
+
+                conn.commit()
 
     await update.message.reply_text(
-    "👋 Welcome to ElentraChat",
-    reply_markup=main_menu)
+"""
+👋 Welcome to ElentraChat
 
-async def setup_profile(update,context):
+🔐 Private anonymous chat
+⚡ Instant random matching
 
-    user_id = update.message.chat_id
-    step = context.user_data.get("setup")
-
-    if step=="name":
-        cursor.execute("UPDATE users SET name=? WHERE user_id=?",
-        (update.message.text,user_id))
-        conn.commit()
-
-        await update.message.reply_text("Send your age:")
-        context.user_data["setup"]="age"
-        return
-
-    if step=="age":
-        cursor.execute("UPDATE users SET age=? WHERE user_id=?",
-        (update.message.text,user_id))
-        conn.commit()
-
-        await update.message.reply_text("Your country?")
-        context.user_data["setup"]="country"
-        return
-
-    if step=="country":
-        cursor.execute("UPDATE users SET country=? WHERE user_id=?",
-        (update.message.text,user_id))
-        conn.commit()
-
-        await update.message.reply_text("Your gender? (boy/girl)")
-        context.user_data["setup"]="gender"
-        return
-
-    if step=="gender":
-        cursor.execute("UPDATE users SET gender=? WHERE user_id=?",
-        (update.message.text,user_id))
-        conn.commit()
-
-        await update.message.reply_text("Looking for? (boy/girl/random)")
-        context.user_data["setup"]="looking"
-        return
-
-    if step=="looking":
-        cursor.execute("UPDATE users SET looking=? WHERE user_id=?",
-        (update.message.text,user_id))
-        conn.commit()
-
-        context.user_data["setup"]=None
-
-        await update.message.reply_text(
-        "Profile saved!",
-        reply_markup=main_menu)
+Choose an option 👇
+""",
+reply_markup=MAIN_MENU)
 
 async def find(update,context):
 
+    user_id = update.message.chat_id
+
+    user = cursor.execute(
+    "SELECT chats_today,vip FROM users WHERE user_id=?",
+    (user_id,)
+    ).fetchone()
+
+    chats_today,vip = user
+
+    if chats_today >= 50 and vip == 0:
+        await update.message.reply_text(
+        "❌ Daily chat limit reached.\nUpgrade VIP for unlimited chats.")
+        return
+
     await update.message.reply_text(
-    "Who do you want to chat with?",
-    reply_markup=gender_menu)
+    "🔎 Searching for someone interesting...")
 
-async def match_user(user_id,queue,update,context):
-
-    await update.message.reply_text("Searching...")
     await asyncio.sleep(1)
 
-    if queue:
-        partner=queue.pop(0)
+    if waiting_users:
 
-        active_chats[user_id]=partner
-        active_chats[partner]=user_id
+        partner = waiting_users.pop(0)
 
-        await update.message.reply_text(
-        "Connected! Say hi 👋")
+        active_chats[user_id] = partner
+        active_chats[partner] = user_id
 
-        await context.bot.send_message(
-        partner,"Connected! Say hi 👋")
+        await update.message.reply_text("✅ Connected! Say hi 👋")
+        await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
+
+        cursor.execute(
+        "UPDATE users SET chats_today = chats_today + 1 WHERE user_id=?",
+        (user_id,)
+        )
+        conn.commit()
 
     else:
-        queue.append(user_id)
-        await update.message.reply_text(
-        "Waiting for stranger...")
+
+        waiting_users.append(user_id)
+
+        await update.message.reply_text("⏳ Waiting for a stranger...")
 
 async def relay(update,context):
 
@@ -160,21 +140,7 @@ async def relay(update,context):
 
         partner = active_chats[user_id]
 
-        try:
-            msg = await update.message.copy(chat_id=partner)
-
-            if update.message.photo:
-
-                timer = photo_timer.get(user_id,5)
-
-                await asyncio.sleep(timer)
-
-                await context.bot.delete_message(
-                chat_id=partner,
-                message_id=msg.message_id)
-
-        except:
-            pass
+        await update.message.copy(partner)
 
 async def next_chat(update,context):
 
@@ -188,12 +154,15 @@ async def next_chat(update,context):
         active_chats.pop(partner,None)
 
         await context.bot.send_message(
-        partner,"Stranger skipped.")
+        partner,
+        "⚠️ Stranger skipped."
+        )
 
-        await update.message.reply_text(
-        "Searching next...")
+        await update.message.reply_text("🔎 Searching next...")
 
-async def stop_chat(update,context):
+        await find(update,context)
+
+async def stop(update,context):
 
     user_id = update.message.chat_id
 
@@ -205,35 +174,106 @@ async def stop_chat(update,context):
         active_chats.pop(partner,None)
 
         await context.bot.send_message(
-        partner,"Stranger disconnected.")
+        partner,
+        "⚠️ Stranger disconnected."
+        )
+
+    await update.message.reply_text(
+    "Chat stopped.",
+    reply_markup=MAIN_MENU)
+
+async def daily(update,context):
+
+    user_id = update.message.chat_id
+
+    data = cursor.execute(
+    "SELECT last_daily FROM users WHERE user_id=?",
+    (user_id,)
+    ).fetchone()
+
+    now = int(time.time())
+
+    if now - data[0] < 86400:
 
         await update.message.reply_text(
-        "Chat ended.",
-        reply_markup=main_menu)
+        "❌ You already claimed daily reward.")
+        return
 
-async def timer(update,context):
+    cursor.execute(
+    "UPDATE users SET coins = coins + 20,last_daily=? WHERE user_id=?",
+    (now,user_id)
+    )
 
-    await update.message.reply_text(
-    "Choose photo auto-delete timer",
-    reply_markup=timer_menu)
-
-async def timer_set(update,context):
-
-    user_id=update.message.chat_id
-    text=update.message.text
-
-    if text=="5 sec":
-        photo_timer[user_id]=5
-
-    if text=="10 sec":
-        photo_timer[user_id]=10
-
-    if text=="20 sec":
-        photo_timer[user_id]=20
+    conn.commit()
 
     await update.message.reply_text(
-    f"Photo timer set: {photo_timer[user_id]} sec",
-    reply_markup=main_menu)
+    "🎁 You received 20 coins!")
+
+async def profile(update,context):
+
+    user_id = update.message.chat_id
+
+    user = cursor.execute(
+    "SELECT coins,vip,referrals FROM users WHERE user_id=?",
+    (user_id,)
+    ).fetchone()
+
+    coins,vip,refs = user
+
+    await update.message.reply_text(
+f"""
+👤 Profile
+
+💰 Coins: {coins}
+💎 VIP: {"Yes" if vip else "No"}
+👥 Referrals: {refs}
+""")
+
+async def invite(update,context):
+
+    user_id = update.message.chat_id
+
+    link = f"https://t.me/ElentraChatBot?start={user_id}"
+
+    await update.message.reply_text(
+f"""
+👥 Invite Friends
+
+Invite link:
+{link}
+
+Earn 20 coins per referral!
+""")
+
+async def shop(update,context):
+
+    await update.message.reply_text(
+"""
+🌍 Country Unlock Shop
+
+🇷🇺 Russia — 100 coins
+🇬🇧 UK — 100 coins
+🇰🇷 Korea — 120 coins
+🇯🇵 Japan — 120 coins
+""")
+
+async def vip(update,context):
+
+    await update.message.reply_text(
+"""
+💎 VIP Benefits
+
+• Unlimited chats
+• All countries unlocked
+• Priority matching
+
+Contact admin for VIP.
+""")
+
+async def report(update,context):
+
+    await update.message.reply_text(
+    "⚠️ User reported.\nAdmin will review.")
 
 async def stats(update,context):
 
@@ -241,46 +281,42 @@ async def stats(update,context):
         return
 
     total = cursor.execute(
-    "SELECT COUNT(*) FROM users").fetchone()[0]
-
-    online = len(online_users)
-    active = len(active_chats)//2
+    "SELECT COUNT(*) FROM users"
+    ).fetchone()[0]
 
     await update.message.reply_text(
 f"""
-Bot Stats
+📊 Bot Statistics
 
-Total users: {total}
-Online users: {online}
-Active chats: {active}
+👥 Total users: {total}
+🟢 Online users: {len(online_users)}
+💬 Active chats: {len(active_chats)//2}
 """)
 
-async def buttons(update,context):
-
-    if context.user_data.get("setup"):
-        await setup_profile(update,context)
-        return
+async def menu(update,context):
 
     text = update.message.text
-    user_id = update.message.chat_id
 
-    if text=="🔎 Find Stranger":
+    if text == "🔎 Find Stranger":
         await find(update,context)
 
-    elif text=="👦 Boy":
-        await match_user(user_id,girls_queue,update,context)
+    elif text == "🎁 Daily Coins":
+        await daily(update,context)
 
-    elif text=="👧 Girl":
-        await match_user(user_id,boys_queue,update,context)
+    elif text == "👤 Profile":
+        await profile(update,context)
 
-    elif text=="🌍 Random":
-        await match_user(user_id,random_queue,update,context)
+    elif text == "👥 Invite Friends":
+        await invite(update,context)
 
-    elif text=="⏱ Photo Timer":
-        await timer(update,context)
+    elif text == "🌍 Country Shop":
+        await shop(update,context)
 
-    elif text in ["5 sec","10 sec","20 sec"]:
-        await timer_set(update,context)
+    elif text == "💎 VIP":
+        await vip(update,context)
+
+    elif text == "⚠️ Report":
+        await report(update,context)
 
     else:
         await relay(update,context)
@@ -289,12 +325,12 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
 app.add_handler(CommandHandler("next",next_chat))
-app.add_handler(CommandHandler("stop",stop_chat))
+app.add_handler(CommandHandler("stop",stop))
 app.add_handler(CommandHandler("stats",stats))
 
-app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO,buttons))
+app.add_handler(MessageHandler(filters.TEXT,menu))
 
-print("ElentraChat V6 running")
+print("ElentraChat V7 running...")
 
 app.run_polling()	
-
+	
