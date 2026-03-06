@@ -86,10 +86,10 @@ async def edit_profile(update: Update):
     await update.message.reply_text(
 """Send profile like:
 
-Name,Age,Gender,country
+Name,Age,Gender
 
 Example:
-Zayn,18,Male,india
+Zayn,18,Male
 """
 )
 
