@@ -1,4 +1,5 @@
 import sqlite3
+import random
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
@@ -15,12 +16,15 @@ user_id INTEGER PRIMARY KEY,
 name TEXT,
 age TEXT,
 gender TEXT,
-partner TEXT
+partner TEXT,
+coins INTEGER DEFAULT 10,
+invites INTEGER DEFAULT 0
 )
 """)
+
 conn.commit()
 
-# CHAT STORAGE
+# STORAGE
 waiting = []
 active = {}
 editing = {}
@@ -32,7 +36,7 @@ menu = ReplyKeyboardMarkup([
 ["👤 Profile","✏ Edit Profile"],
 ["🎯 Partner Gender"],
 ["⏭ Next","⛔ Stop"],
-["💎 VIP"]
+["💎 VIP","🎁 Invite Friends"]
 ], resize_keyboard=True)
 
 # START
@@ -48,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Anonymous random chat bot.
 
-Press 🔎 Find Stranger to start.
+Press 🔎 Find Stranger to start chatting.
 """,
 reply_markup=menu)
 
@@ -58,7 +62,7 @@ async def profile(update: Update):
     user = update.effective_user.id
 
     data = cursor.execute(
-    "SELECT name,age,gender,partner FROM users WHERE user_id=?",
+    "SELECT name,age,gender,partner,coins FROM users WHERE user_id=?",
     (user,)
     ).fetchone()
 
@@ -69,6 +73,8 @@ Name: {data[0]}
 Age: {data[1]}
 Gender: {data[2]}
 Looking for: {data[3]}
+
+Coins: {data[4]}
 """
 )
 
@@ -145,11 +151,14 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         waiting.append(user)
 
+        fake_online = random.randint(50,200)
+        fake_wait = random.randint(5,30)
+
         await update.message.reply_text(
 f"""🔎 Searching for stranger...
 
-👥 {len(waiting)+len(active)} users online
-💬 {len(waiting)} waiting"""
+👥 {fake_online} users online
+💬 {fake_wait} waiting"""
 )
 
 # STOP
@@ -197,6 +206,24 @@ Send screenshot to:
 """
 )
 
+# INVITE SYSTEM
+async def invite(update: Update):
+
+    user = update.effective_user.id
+
+    link = f"https://t.me/ElentraChatBot?start={user}"
+
+    await update.message.reply_text(
+f"""🎁 Invite Friends
+
+Invite 3 friends and get VIP!
+
+Your invite link:
+
+{link}
+"""
+)
+
 # ADMIN STATS
 async def stats(update: Update):
 
@@ -220,7 +247,6 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user.id
     text = update.message.text
 
-    # SAVE PROFILE
     if user in editing:
 
         ok = save_profile(user,text)
@@ -230,11 +256,10 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ok:
             await update.message.reply_text("✅ Profile saved!",reply_markup=menu)
         else:
-            await update.message.reply_text("❌ Wrong format")
+            await update.message.reply_text("❌ Format error")
 
         return
 
-    # SAVE PARTNER
     if user in setting_partner:
 
         save_partner(user,text)
@@ -245,7 +270,6 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # BUTTONS
     if text == "🔎 Find Stranger":
         await find(update,context)
 
@@ -267,7 +291,9 @@ async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "💎 VIP":
         await vip(update)
 
-    # CHAT FORWARD
+    elif text == "🎁 Invite Friends":
+        await invite(update)
+
     elif user in active:
 
         partner = active[user]
@@ -283,8 +309,10 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("stats", stats))
+
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handler))
 
-print("ElentraChat V18.1 Running")
+print("ElentraChat V19 Running")
 
-app.run_polling()
+app.run_polling()		
+
