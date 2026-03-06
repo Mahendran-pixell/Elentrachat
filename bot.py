@@ -3,162 +3,181 @@ import time
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-TOKEN="8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
-ADMIN_ID=8232389772
+TOKEN = "8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
 
-BAD_WORDS=["spam","scam","abuse"]
-
-conn=sqlite3.connect("users.db",check_same_thread=False)
-cursor=conn.cursor()
+conn = sqlite3.connect("users.db", check_same_thread=False)
+cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users(
 user_id INTEGER PRIMARY KEY,
-gender TEXT,
-partner TEXT DEFAULT 'Any',
+gender TEXT DEFAULT 'unknown',
+pref TEXT DEFAULT 'any',
 vip INTEGER DEFAULT 0,
-daily_chats INTEGER DEFAULT 0,
-last_reset INTEGER DEFAULT 0
+daily INTEGER DEFAULT 0,
+reset_time INTEGER DEFAULT 0
 )
 """)
 
 conn.commit()
 
-waiting=[]
-active={}
+waiting = []
+active = {}
 
-menu=ReplyKeyboardMarkup([
-["🔎 Find Stranger"],
-["🎯 Partner Gender"],
+BAD_WORDS = ["spam","scam","abuse"]
+
+menu = ReplyKeyboardMarkup(
+[
+["🔎 Find Partner"],
+["⚙ Settings"],
 ["⏭ Next","⛔ Stop"],
 ["💎 VIP"]
-],resize_keyboard=True)
+],
+resize_keyboard=True
+)
 
-# RESET DAILY LIMIT
+# reset daily chat count
 def reset_daily(user):
+    row = cursor.execute("SELECT reset_time FROM users WHERE user_id=?",(user,)).fetchone()
+    if not row:
+        return
 
-    last=cursor.execute(
-        "SELECT last_reset FROM users WHERE user_id=?",(user,)
-    ).fetchone()[0]
+    last = row[0]
+    now = int(time.time())
 
-    now=int(time.time())
-
-    if now-last>86400:
-
-        cursor.execute(
-        "UPDATE users SET daily_chats=0,last_reset=? WHERE user_id=?",
-        (now,user)
-        )
+    if now - last > 86400:
+        cursor.execute("UPDATE users SET daily=0, reset_time=? WHERE user_id=?",(now,user))
         conn.commit()
 
-# START
+# start
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user=update.effective_user.id
+    user = update.effective_user.id
 
     cursor.execute(
-    "INSERT OR IGNORE INTO users(user_id,last_reset) VALUES(?,?)",
-    (user,int(time.time()))
+        "INSERT OR IGNORE INTO users(user_id,reset_time) VALUES(?,?)",
+        (user,int(time.time()))
     )
+
     conn.commit()
 
     await update.message.reply_text(
-    "👋 Welcome to ElentraChat",
-    reply_markup=menu
+        "👋 Welcome to ElentraChat\n\nPress 🔎 Find Partner",
+        reply_markup=menu
     )
 
-# SET PARTNER
-async def partner(update:Update):
+# settings
+async def settings(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
+
+    data = cursor.execute(
+        "SELECT gender,pref FROM users WHERE user_id=?",
+        (user,)
+    ).fetchone()
 
     await update.message.reply_text(
-    "Send preferred partner gender:\nMale / Female / Any"
-    )
+f"""⚙ Your Settings
 
-# MATCHING
+Gender: {data[0]}
+Looking for: {data[1]}
+
+Send:
+male
+female
+any
+"""
+)
+
+# match system
 def match(user):
 
-    gender=cursor.execute(
-    "SELECT gender FROM users WHERE user_id=?",(user,)
+    my_gender = cursor.execute(
+        "SELECT gender FROM users WHERE user_id=?",(user,)
     ).fetchone()[0]
 
-    pref=cursor.execute(
-    "SELECT partner FROM users WHERE user_id=?",(user,)
+    my_pref = cursor.execute(
+        "SELECT pref FROM users WHERE user_id=?",(user,)
     ).fetchone()[0]
 
-    for p in waiting:
+    for u in waiting:
 
-        g=cursor.execute(
-        "SELECT gender FROM users WHERE user_id=?",(p,)
-        ).fetchone()[0]
+        g = cursor.execute("SELECT gender FROM users WHERE user_id=?",(u,)).fetchone()[0]
+        p = cursor.execute("SELECT pref FROM users WHERE user_id=?",(u,)).fetchone()[0]
 
-        pr=cursor.execute(
-        "SELECT partner FROM users WHERE user_id=?",(p,)
-        ).fetchone()[0]
+        if (my_pref=="any" or my_pref==g) and (p=="any" or p==my_gender):
 
-        if (pref=="Any" or pref==g) and (pr=="Any" or pr==gender):
-
-            waiting.remove(p)
-            return p
+            waiting.remove(u)
+            return u
 
     return None
 
-# FIND
+# find partner
 async def find(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user=update.effective_user.id
+    user = update.effective_user.id
 
     reset_daily(user)
 
-    data=cursor.execute(
-    "SELECT daily_chats,vip FROM users WHERE user_id=?",(user,)
+    data = cursor.execute(
+        "SELECT daily,vip FROM users WHERE user_id=?",
+        (user,)
     ).fetchone()
 
-    if not data[1] and data[0]>=50:
+    if not data[1] and data[0] >= 50:
 
         await update.message.reply_text(
-        "⚠️ Daily limit reached (50 chats)\nCome back tomorrow or buy VIP"
+            "⚠ Daily chat limit reached (50)\nCome back tomorrow."
         )
+
         return
 
-    partner=match(user)
+    partner = match(user)
 
     if partner:
 
-        active[user]=partner
-        active[partner]=user
+        active[user] = partner
+        active[partner] = user
 
         cursor.execute(
-        "UPDATE users SET daily_chats=daily_chats+1 WHERE user_id=?",
-        (user,)
+            "UPDATE users SET daily=daily+1 WHERE user_id=?",
+            (user,)
         )
+
         conn.commit()
 
-        await context.bot.send_message(user,"✅ Connected")
-        await context.bot.send_message(partner,"✅ Connected")
+        await context.bot.send_message(user,"✅ Connected!")
+        await context.bot.send_message(partner,"✅ Connected!")
 
     else:
 
         waiting.append(user)
 
         await update.message.reply_text(
-        f"🔎 Searching...\n👥 Users online: {len(waiting)+len(active)}"
+            f"🔎 Searching...\nWaiting users: {len(waiting)}"
         )
 
-# STOP
+# stop chat
 async def stop(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user=update.effective_user.id
+    user = update.effective_user.id
 
     if user in active:
 
-        p=active[user]
+        p = active[user]
 
         del active[user]
         del active[p]
 
-        await context.bot.send_message(p,"Partner left chat")
+        await context.bot.send_message(p,"❌ Partner left")
 
-# VIP
+# next
+async def next_chat(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
+    await stop(update,context)
+    await find(update,context)
+
+# vip
 async def vip(update:Update):
 
     await update.message.reply_text(
@@ -169,64 +188,74 @@ Unlimited chats
 UPI:
 hatmahendran267r@ybl
 
-Send payment screenshot
-@Elentraadmin001
+Send screenshot to admin.
 """
 )
 
-# MESSAGE HANDLER
+# message handler
 async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user=update.effective_user.id
+    user = update.effective_user.id
 
     if update.message.text:
 
-        text=update.message.text.lower()
+        text = update.message.text.lower()
+
+        if text in ["male","female","any"]:
+
+            cursor.execute(
+                "UPDATE users SET pref=? WHERE user_id=?",
+                (text,user)
+            )
+
+            conn.commit()
+
+            await update.message.reply_text("Preference saved")
+
+            return
 
         for w in BAD_WORDS:
 
             if w in text:
-
-                await update.message.reply_text(
-                "⚠️ Message blocked by moderation"
-                )
+                await update.message.reply_text("⚠ Message blocked")
                 return
 
     if user in active:
 
-        p=active[user]
+        partner = active[user]
 
-        msg=await context.bot.copy_message(
-        chat_id=p,
-        from_chat_id=user,
-        message_id=update.message.message_id
+        msg = await context.bot.copy_message(
+            chat_id=partner,
+            from_chat_id=user,
+            message_id=update.message.message_id
         )
 
         # self destruct photo
         if update.message.photo:
 
             await context.job_queue.run_once(
-            lambda c: c.bot.delete_message(p,msg.message_id),
-            10
+                lambda c: c.bot.delete_message(partner,msg.message_id),
+                10
             )
 
-    elif update.message.text=="🔎 Find Stranger":
-        await find(update,context)
+    else:
 
-    elif update.message.text=="⛔ Stop":
-        await stop(update,context)
+        if update.message.text == "🔎 Find Partner":
+            await find(update,context)
 
-    elif update.message.text=="⏭ Next":
-        await stop(update,context)
-        await find(update,context)
+        elif update.message.text == "⛔ Stop":
+            await stop(update,context)
 
-    elif update.message.text=="💎 VIP":
-        await vip(update)
+        elif update.message.text == "⏭ Next":
+            await next_chat(update,context)
 
-    elif update.message.text=="🎯 Partner Gender":
-        await partner(update)
+        elif update.message.text == "⚙ Settings":
+            await settings(update,context)
 
-app=ApplicationBuilder().token(TOKEN).build()
+        elif update.message.text == "💎 VIP":
+            await vip(update)
+
+app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
 app.add_handler(MessageHandler(filters.ALL,handler))
