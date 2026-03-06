@@ -4,7 +4,7 @@ import time
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-TOKEN= "8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
+TOKEN="8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
 ADMIN_ID=8232389772
 
 conn=sqlite3.connect("users.db",check_same_thread=False)
@@ -39,10 +39,10 @@ menu=ReplyKeyboardMarkup([
 ["🎯 Partner Gender"],
 ["⏭ Next","⛔ Stop"],
 ["💎 VIP","🎁 Invite Friends"],
-["🎁 Daily Reward","📜 Terms"]
+["🎁 Daily Reward","🏆 Leaderboard"],
+["📜 Terms","❓ Help"]
 ],resize_keyboard=True)
 
-# TERMS
 TERMS_TEXT="""
 📜 Terms & Privacy
 
@@ -55,10 +55,24 @@ TERMS_TEXT="""
 Type /agree to continue.
 """
 
+HELP_TEXT="""
+❓ ElentraChat Help
+
+🔎 Find Stranger — start chat
+⏭ Next — skip partner
+⛔ Stop — end chat
+👤 Profile — view profile
+✏ Edit Profile — update profile
+🎯 Partner Gender — choose preference
+🎁 Invite Friends — earn VIP
+🎁 Daily Reward — collect coins
+"""
+
 # START
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     user=update.effective_user.id
+    args=context.args
 
     cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)",(user,))
     conn.commit()
@@ -71,29 +85,17 @@ async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(TERMS_TEXT)
         return
 
-    await update.message.reply_text(
-"👋 Welcome to ElentraChat",
-reply_markup=menu)
+    await update.message.reply_text("👋 Welcome to ElentraChat",reply_markup=menu)
 
 # AGREE
 async def agree(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     user=update.effective_user.id
 
-    cursor.execute(
-    "UPDATE users SET accepted=1 WHERE user_id=?",(user,)
-    )
-
+    cursor.execute("UPDATE users SET accepted=1 WHERE user_id=?",(user,))
     conn.commit()
 
-    await update.message.reply_text(
-"✅ Rules accepted!",
-reply_markup=menu)
-
-# TERMS BUTTON
-async def terms(update:Update):
-
-    await update.message.reply_text(TERMS_TEXT)
+    await update.message.reply_text("✅ Rules accepted!",reply_markup=menu)
 
 # PROFILE
 async def profile(update:Update):
@@ -101,7 +103,7 @@ async def profile(update:Update):
     user=update.effective_user.id
 
     data=cursor.execute(
-    "SELECT name,age,gender,partner,coins FROM users WHERE user_id=?",
+    "SELECT name,age,gender,partner,coins,invites FROM users WHERE user_id=?",
     (user,)
     ).fetchone()
 
@@ -114,6 +116,7 @@ Gender: {data[2]}
 Looking for: {data[3]}
 
 Coins: {data[4]}
+Invites: {data[5]}
 """
 )
 
@@ -123,12 +126,7 @@ async def edit_profile(update:Update):
     editing[update.effective_user.id]=True
 
     await update.message.reply_text(
-"""Send profile like:
-
-Name,Age,Gender
-
-Example:
-Zayn,18,Male"""
+"Send profile like:\nName,Age,Gender\nExample:\nZayn,18,Male"
 )
 
 def save_profile(user,text):
@@ -143,7 +141,6 @@ def save_profile(user,text):
 
         conn.commit()
         return True
-
     except:
         return False
 
@@ -187,7 +184,7 @@ async def find(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
 f"""🔎 Searching...
 
-👥 {random.randint(80,250)} users online
+👥 {random.randint(120,300)} users online
 💬 {random.randint(10,40)} waiting"""
 )
 
@@ -259,7 +256,6 @@ async def reward(update:Update):
     now=int(time.time())
 
     if now-last<86400:
-
         await update.message.reply_text("❌ Come back tomorrow")
         return
 
@@ -267,27 +263,23 @@ async def reward(update:Update):
     "UPDATE users SET coins=coins+5,last_reward=? WHERE user_id=?",
     (now,user)
     )
-
     conn.commit()
 
     await update.message.reply_text("🎁 Daily reward +5 coins")
 
-# BAN
-async def ban(update:Update,context:ContextTypes.DEFAULT_TYPE):
+# LEADERBOARD
+async def leaderboard(update:Update):
 
-    if update.effective_user.id!=ADMIN_ID:
-        return
+    top=cursor.execute(
+    "SELECT user_id,invites FROM users ORDER BY invites DESC LIMIT 5"
+    ).fetchall()
 
-    user_id=int(context.args[0])
+    text="🏆 Top Inviters\n\n"
 
-    cursor.execute(
-    "UPDATE users SET banned=1 WHERE user_id=?",
-    (user_id,)
-    )
+    for i,u in enumerate(top):
+        text+=f"{i+1}. {u[0]} — {u[1]} invites\n"
 
-    conn.commit()
-
-    await update.message.reply_text("User banned")
+    await update.message.reply_text(text)
 
 # HANDLER
 async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
@@ -295,10 +287,10 @@ async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
     user=update.effective_user.id
     text=update.message.text
 
-    # spam protection
     now=time.time()
+
     if user in last_msg and now-last_msg[user]<1:
-        await update.message.reply_text("⚠️ Slow down")
+        await update.message.reply_text("⚠️ Slow down!")
         return
 
     last_msg[user]=now
@@ -348,8 +340,14 @@ async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
     elif text=="🎁 Daily Reward":
         await reward(update)
 
+    elif text=="🏆 Leaderboard":
+        await leaderboard(update)
+
     elif text=="📜 Terms":
-        await terms(update)
+        await update.message.reply_text(TERMS_TEXT)
+
+    elif text=="❓ Help":
+        await update.message.reply_text(HELP_TEXT)
 
     elif user in active:
 
@@ -365,10 +363,9 @@ app=ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
 app.add_handler(CommandHandler("agree",agree))
-app.add_handler(CommandHandler("ban",ban))
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handler))
 
-print("ElentraChat V21 running")
+print("ElentraChat V22 running")
 
 app.run_polling()
