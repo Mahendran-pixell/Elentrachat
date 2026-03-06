@@ -86,10 +86,10 @@ async def edit_profile(update: Update):
     await update.message.reply_text(
 """Send profile like:
 
-Name,Age,Gender
+Name,Age,Gender,country
 
 Example:
-Zayn,18,Male
+Zayn,18,Male,india
 """
 )
 
@@ -314,5 +314,4 @@ app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handler))
 
 print("ElentraChat V19 Running")
 
-app.run_polling()		
-
+app.run_polling()
