@@ -14,8 +14,7 @@ user_id INTEGER PRIMARY KEY,
 name TEXT,
 age TEXT,
 country TEXT,
-gender TEXT,
-partner TEXT
+gender TEXT
 )
 """)
 
@@ -23,13 +22,17 @@ conn.commit()
 
 waiting = []
 active = {}
-editing = {}
+editing_profile = {}
 
-menu = ReplyKeyboardMarkup([
+menu = ReplyKeyboardMarkup(
+[
 ["🔎 Find Stranger"],
 ["👤 Profile","✏️ Edit Profile"],
+["⏭ Next","⛔ Stop"],
 ["💎 VIP"]
-], resize_keyboard=True)
+],
+resize_keyboard=True
+)
 
 # START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,8 +43,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     await update.message.reply_text(
-"👋 Welcome to ElentraChat",
-reply_markup=menu)
+"👋 Welcome to ElentraChat\n\nPress 'Find Stranger' to start chatting.",
+reply_markup=menu
+)
 
 # PROFILE
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,15 +63,14 @@ f"""👤 Profile
 Name: {data[0]}
 Age: {data[1]}
 Country: {data[2]}
-Gender: {data[3]}
-"""
+Gender: {data[3]}"""
 )
 
 # EDIT PROFILE
 async def edit_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
-    editing[user] = True
+    editing_profile[user] = True
 
     await update.message.reply_text(
 """Send profile like:
@@ -79,12 +82,9 @@ Zayn,18,India,Male"""
 )
 
 # SAVE PROFILE
-async def save_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def save_profile(update: Update):
 
     user = update.effective_user.id
-
-    if user not in editing:
-        return
 
     try:
 
@@ -98,18 +98,21 @@ async def save_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         conn.commit()
 
-        del editing[user]
+        editing_profile.pop(user)
 
-        await update.message.reply_text("✅ Profile saved!")
+        return True
 
     except:
-
-        await update.message.reply_text("❌ Format wrong. Use:\nName,Age,Country,Gender")
+        return False
 
 # FIND STRANGER
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
+
+    if user in active:
+        await update.message.reply_text("You are already chatting.")
+        return
 
     if waiting:
 
@@ -118,14 +121,14 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active[user] = partner
         active[partner] = user
 
-        await context.bot.send_message(user,"✅ Connected!")
-        await context.bot.send_message(partner,"✅ Connected!")
+        await context.bot.send_message(user,"✅ Connected! Say hi 👋")
+        await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
 
     else:
 
         waiting.append(user)
 
-        await update.message.reply_text("🔎 Searching for partner...")
+        await update.message.reply_text("🔎 Searching for stranger...")
 
 # STOP
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,7 +142,8 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del active[user]
         del active[partner]
 
-        await context.bot.send_message(partner,"❌ Partner left")
+        await context.bot.send_message(partner,"❌ Partner left chat.")
+        await update.message.reply_text("Chat ended.")
 
 # NEXT
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -147,30 +151,11 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await stop(update,context)
     await find(update,context)
 
-# RELAY
-async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user = update.effective_user.id
-
-    if user in editing:
-        await save_profile(update,context)
-        return
-
-    if user in active:
-
-        partner = active[user]
-
-        await context.bot.copy_message(
-        chat_id=partner,
-        from_chat_id=user,
-        message_id=update.message.message_id
-        )
-
 # VIP
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-"""💎 VIP
+"""💎 VIP Membership
 
 1 Month – ₹49
 3 Months – ₹99
@@ -179,16 +164,47 @@ Lifetime – ₹299
 UPI:
 hatmahendran267r@ybl
 
-Send screenshot to:
+Send payment screenshot to:
 @Elentraadmin001
 """
 )
 
-# BUTTONS
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ADMIN STATS
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    users = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+    await update.message.reply_text(
+f"""📊 Bot Stats
+
+Users: {users}
+Waiting: {len(waiting)}
+Active Chats: {len(active)//2}
+"""
+)
+
+# MESSAGE HANDLER
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
     text = update.message.text
 
+    # profile editing
+    if user in editing_profile:
+
+        ok = await save_profile(update)
+
+        if ok:
+            await update.message.reply_text("✅ Profile saved!")
+        else:
+            await update.message.reply_text("❌ Wrong format.\nUse: Name,Age,Country,Gender")
+
+        return
+
+    # menu buttons
     if text == "🔎 Find Stranger":
         await find(update,context)
 
@@ -198,18 +214,34 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "✏️ Edit Profile":
         await edit_profile(update,context)
 
+    elif text == "⏭ Next":
+        await next_chat(update,context)
+
+    elif text == "⛔ Stop":
+        await stop(update,context)
+
     elif text == "💎 VIP":
         await vip(update,context)
 
+    # relay chat
+    elif user in active:
+
+        partner = active[user]
+
+        await context.bot.copy_message(
+        chat_id=partner,
+        from_chat_id=user,
+        message_id=update.message.message_id
+        )
+
+# RUN BOT
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("next", next_chat))
-app.add_handler(CommandHandler("stop", stop))
+app.add_handler(CommandHandler("stats", stats))
 
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buttons))
-app.add_handler(MessageHandler(filters.ALL, relay))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-print("Bot running")
+print("Bot running...")
 
 app.run_polling()
