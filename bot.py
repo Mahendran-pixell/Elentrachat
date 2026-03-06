@@ -3,16 +3,20 @@ import time
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-TOKEN = "8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
+TOKEN="8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
+ADMIN="@Elentraadmin001"
+ADMIN_ID=8232389772
 
-conn = sqlite3.connect("users.db", check_same_thread=False)
-cursor = conn.cursor()
+conn=sqlite3.connect("users.db",check_same_thread=False)
+cursor=conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users(
 user_id INTEGER PRIMARY KEY,
-gender TEXT DEFAULT 'unknown',
-pref TEXT DEFAULT 'any',
+name TEXT,
+age TEXT,
+gender TEXT,
+pref TEXT DEFAULT 'Any',
 vip INTEGER DEFAULT 0,
 daily INTEGER DEFAULT 0,
 reset_time INTEGER DEFAULT 0
@@ -21,91 +25,145 @@ reset_time INTEGER DEFAULT 0
 
 conn.commit()
 
-waiting = []
-active = {}
+waiting=[]
+active={}
+editing={}
 
-BAD_WORDS = ["spam","scam","abuse"]
-
-menu = ReplyKeyboardMarkup(
-[
+menu=ReplyKeyboardMarkup([
 ["🔎 Find Partner"],
-["⚙ Settings"],
+["👤 Profile","✏ Edit Profile"],
+["🎯 Partner Gender"],
 ["⏭ Next","⛔ Stop"],
 ["💎 VIP"]
-],
-resize_keyboard=True
-)
+],resize_keyboard=True)
 
-# reset daily chat count
+# reset daily
 def reset_daily(user):
-    row = cursor.execute("SELECT reset_time FROM users WHERE user_id=?",(user,)).fetchone()
+
+    row=cursor.execute(
+    "SELECT reset_time FROM users WHERE user_id=?",
+    (user,)
+    ).fetchone()
+
     if not row:
         return
 
-    last = row[0]
-    now = int(time.time())
+    last=row[0]
+    now=int(time.time())
 
-    if now - last > 86400:
-        cursor.execute("UPDATE users SET daily=0, reset_time=? WHERE user_id=?",(now,user))
+    if now-last>86400:
+
+        cursor.execute(
+        "UPDATE users SET daily=0,reset_time=? WHERE user_id=?",
+        (now,user)
+        )
+
         conn.commit()
 
 # start
 async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user.id
+    user=update.effective_user.id
 
     cursor.execute(
-        "INSERT OR IGNORE INTO users(user_id,reset_time) VALUES(?,?)",
-        (user,int(time.time()))
+    "INSERT OR IGNORE INTO users(user_id,reset_time) VALUES(?,?)",
+    (user,int(time.time()))
     )
 
     conn.commit()
 
     await update.message.reply_text(
-        "👋 Welcome to ElentraChat\n\nPress 🔎 Find Partner",
-        reply_markup=menu
-    )
+"""👋 Welcome to ElentraChat
 
-# settings
-async def settings(update:Update,context:ContextTypes.DEFAULT_TYPE):
+Anonymous random chat.
 
-    user = update.effective_user.id
-
-    data = cursor.execute(
-        "SELECT gender,pref FROM users WHERE user_id=?",
-        (user,)
-    ).fetchone()
-
-    await update.message.reply_text(
-f"""⚙ Your Settings
-
-Gender: {data[0]}
-Looking for: {data[1]}
-
-Send:
-male
-female
-any
-"""
+Press 🔎 Find Partner to start.
+""",
+reply_markup=menu
 )
 
-# match system
+# profile
+async def profile(update:Update):
+
+    user=update.effective_user.id
+
+    data=cursor.execute(
+    "SELECT name,age,gender,pref,vip FROM users WHERE user_id=?",
+    (user,)
+    ).fetchone()
+
+    await update.message.reply_text(f"""
+👤 Your Profile
+
+Name: {data[0]}
+Age: {data[1]}
+Gender: {data[2]}
+Looking for: {data[3]}
+
+VIP: {"Yes" if data[4] else "No"}
+ID: {user}
+""")
+
+# edit profile
+async def edit(update:Update):
+
+    editing[update.effective_user.id]=True
+
+    await update.message.reply_text(
+"Send profile like:\nName,Age,Gender\nExample:\nZayn,18,Male"
+)
+
+def save_profile(user,text):
+
+    try:
+
+        name,age,gender=text.split(",")
+
+        cursor.execute(
+        "UPDATE users SET name=?,age=?,gender=? WHERE user_id=?",
+        (name.strip(),age.strip(),gender.strip(),user)
+        )
+
+        conn.commit()
+
+        return True
+
+    except:
+        return False
+
+# partner gender
+async def partner(update:Update):
+
+    await update.message.reply_text(
+"Send preferred partner gender:\nMale / Female / Any"
+)
+
+# match
 def match(user):
 
-    my_gender = cursor.execute(
-        "SELECT gender FROM users WHERE user_id=?",(user,)
+    my_gender=cursor.execute(
+    "SELECT gender FROM users WHERE user_id=?",
+    (user,)
     ).fetchone()[0]
 
-    my_pref = cursor.execute(
-        "SELECT pref FROM users WHERE user_id=?",(user,)
+    my_pref=cursor.execute(
+    "SELECT pref FROM users WHERE user_id=?",
+    (user,)
     ).fetchone()[0]
 
     for u in waiting:
 
-        g = cursor.execute("SELECT gender FROM users WHERE user_id=?",(u,)).fetchone()[0]
-        p = cursor.execute("SELECT pref FROM users WHERE user_id=?",(u,)).fetchone()[0]
+        g=cursor.execute(
+        "SELECT gender FROM users WHERE user_id=?",
+        (u,)
+        ).fetchone()[0]
 
-        if (my_pref=="any" or my_pref==g) and (p=="any" or p==my_gender):
+        p=cursor.execute(
+        "SELECT pref FROM users WHERE user_id=?",
+        (u,)
+        ).fetchone()[0]
+
+        if (my_pref=="Any" or my_pref==g) and (p=="Any" or p==my_gender):
 
             waiting.remove(u)
             return u
@@ -115,56 +173,55 @@ def match(user):
 # find partner
 async def find(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user.id
+    user=update.effective_user.id
 
     reset_daily(user)
 
-    data = cursor.execute(
-        "SELECT daily,vip FROM users WHERE user_id=?",
-        (user,)
+    data=cursor.execute(
+    "SELECT daily,vip FROM users WHERE user_id=?",
+    (user,)
     ).fetchone()
 
-    if not data[1] and data[0] >= 50:
+    if not data[1] and data[0]>=50:
 
         await update.message.reply_text(
-            "⚠ Daily chat limit reached (50)\nCome back tomorrow."
+"⚠ Daily limit reached (50 chats)\nUpgrade to VIP."
         )
-
         return
 
-    partner = match(user)
+    partner=match(user)
 
     if partner:
 
-        active[user] = partner
-        active[partner] = user
+        active[user]=partner
+        active[partner]=user
 
         cursor.execute(
-            "UPDATE users SET daily=daily+1 WHERE user_id=?",
-            (user,)
+        "UPDATE users SET daily=daily+1 WHERE user_id=?",
+        (user,)
         )
 
         conn.commit()
 
-        await context.bot.send_message(user,"✅ Connected!")
-        await context.bot.send_message(partner,"✅ Connected!")
+        await context.bot.send_message(user,"✅ Connected! Say hi 👋")
+        await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
 
     else:
 
         waiting.append(user)
 
         await update.message.reply_text(
-            f"🔎 Searching...\nWaiting users: {len(waiting)}"
+f"🔎 Searching...\nWaiting users: {len(waiting)}"
         )
 
-# stop chat
+# stop
 async def stop(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user.id
+    user=update.effective_user.id
 
     if user in active:
 
-        p = active[user]
+        p=active[user]
 
         del active[user]
         del active[p]
@@ -177,89 +234,99 @@ async def next_chat(update:Update,context:ContextTypes.DEFAULT_TYPE):
     await stop(update,context)
     await find(update,context)
 
-# vip
+# vip info
 async def vip(update:Update):
 
-    await update.message.reply_text(
-"""💎 VIP Membership
+    await update.message.reply_text(f"""
+💎 VIP Membership
 
 Unlimited chats
+Gender search
+
+Price:
+1 Month – ₹49
+Lifetime – ₹299
 
 UPI:
 hatmahendran267r@ybl
 
-Send screenshot to admin.
-"""
-)
+Send payment screenshot to:
+{ADMIN}
+""")
+
+# admin add vip
+async def addvip(update:Update,context:ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id!=ADMIN_ID:
+        return
+
+    uid=int(context.args[0])
+
+    cursor.execute(
+    "UPDATE users SET vip=1 WHERE user_id=?",
+    (uid,)
+    )
+
+    conn.commit()
+
+    await update.message.reply_text("VIP activated")
 
 # message handler
 async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    user = update.effective_user.id
+    user=update.effective_user.id
 
-    if update.message.text:
+    if user in editing:
 
-        text = update.message.text.lower()
+        ok=save_profile(user,update.message.text)
+        editing.pop(user)
 
-        if text in ["male","female","any"]:
+        if ok:
+            await update.message.reply_text("Profile saved",reply_markup=menu)
 
-            cursor.execute(
-                "UPDATE users SET pref=? WHERE user_id=?",
-                (text,user)
-            )
+        return
 
-            conn.commit()
-
-            await update.message.reply_text("Preference saved")
-
-            return
-
-        for w in BAD_WORDS:
-
-            if w in text:
-                await update.message.reply_text("⚠ Message blocked")
-                return
+    text=update.message.text
 
     if user in active:
 
-        partner = active[user]
+        p=active[user]
 
-        msg = await context.bot.copy_message(
-            chat_id=partner,
-            from_chat_id=user,
-            message_id=update.message.message_id
+        await context.bot.copy_message(
+        chat_id=p,
+        from_chat_id=user,
+        message_id=update.message.message_id
         )
-
-        # self destruct photo
-        if update.message.photo:
-
-            await context.job_queue.run_once(
-                lambda c: c.bot.delete_message(partner,msg.message_id),
-                10
-            )
 
     else:
 
-        if update.message.text == "🔎 Find Partner":
+        if text=="🔎 Find Partner":
             await find(update,context)
 
-        elif update.message.text == "⛔ Stop":
+        elif text=="⛔ Stop":
             await stop(update,context)
 
-        elif update.message.text == "⏭ Next":
+        elif text=="⏭ Next":
             await next_chat(update,context)
 
-        elif update.message.text == "⚙ Settings":
-            await settings(update,context)
+        elif text=="👤 Profile":
+            await profile(update)
 
-        elif update.message.text == "💎 VIP":
+        elif text=="✏ Edit Profile":
+            await edit(update)
+
+        elif text=="💎 VIP":
             await vip(update)
 
-app = ApplicationBuilder().token(TOKEN).build()
+        elif text=="🎯 Partner Gender":
+            await partner(update)
+
+app=ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
+app.add_handler(CommandHandler("addvip",addvip))
 app.add_handler(MessageHandler(filters.ALL,handler))
 
-print("ElentraChat V24 running")
+print("ElentraChat V1 running")
 
 app.run_polling()
