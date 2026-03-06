@@ -13,18 +13,22 @@ CREATE TABLE IF NOT EXISTS users(
 user_id INTEGER PRIMARY KEY,
 name TEXT,
 age TEXT,
-gender TEXT,
 country TEXT,
+gender TEXT,
 partner TEXT
 )
 """)
 
+conn.commit()
+
 waiting = []
 active = {}
+editing = {}
 
 menu = ReplyKeyboardMarkup([
 ["🔎 Find Stranger"],
-["👤 Profile", "💎 VIP"]
+["👤 Profile","✏️ Edit Profile"],
+["💎 VIP"]
 ], resize_keyboard=True)
 
 # START
@@ -36,9 +40,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
 
     await update.message.reply_text(
-"""👋 Welcome to ElentraChat
-
-Use menu to start chatting""",
+"👋 Welcome to ElentraChat",
 reply_markup=menu)
 
 # PROFILE
@@ -47,7 +49,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user.id
 
     data = cursor.execute(
-    "SELECT name,age,gender,country,partner FROM users WHERE user_id=?",
+    "SELECT name,age,country,gender FROM users WHERE user_id=?",
     (user,)
     ).fetchone()
 
@@ -56,29 +58,53 @@ f"""👤 Profile
 
 Name: {data[0]}
 Age: {data[1]}
-Gender: {data[2]}
-Country: {data[3]}
-Looking for: {data[4]}
+Country: {data[2]}
+Gender: {data[3]}
 """
 )
 
-# VIP
-async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# EDIT PROFILE
+async def edit_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
+    editing[user] = True
 
     await update.message.reply_text(
-"""💎 VIP Membership
+"""Send profile like:
 
-1 Month VIP – ₹49
-3 Months VIP – ₹99
-Lifetime – ₹299
+Name,Age,Country,Gender
 
-UPI Payment:
-hatmahendran267r@ybl
-
-After payment send screenshot to:
-@Elentraadmin001
-"""
+Example:
+Zayn,18,India,Male"""
 )
+
+# SAVE PROFILE
+async def save_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = update.effective_user.id
+
+    if user not in editing:
+        return
+
+    try:
+
+        name,age,country,gender = update.message.text.split(",")
+
+        cursor.execute("""
+        UPDATE users
+        SET name=?,age=?,country=?,gender=?
+        WHERE user_id=?
+        """,(name.strip(),age.strip(),country.strip(),gender.strip(),user))
+
+        conn.commit()
+
+        del editing[user]
+
+        await update.message.reply_text("✅ Profile saved!")
+
+    except:
+
+        await update.message.reply_text("❌ Format wrong. Use:\nName,Age,Country,Gender")
 
 # FIND STRANGER
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,8 +118,8 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active[user] = partner
         active[partner] = user
 
-        await context.bot.send_message(user,"✅ Connected! Say hi")
-        await context.bot.send_message(partner,"✅ Connected! Say hi")
+        await context.bot.send_message(user,"✅ Connected!")
+        await context.bot.send_message(partner,"✅ Connected!")
 
     else:
 
@@ -113,8 +139,7 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del active[user]
         del active[partner]
 
-        await context.bot.send_message(partner,"❌ Partner left chat")
-        await update.message.reply_text("Chat ended")
+        await context.bot.send_message(partner,"❌ Partner left")
 
 # NEXT
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -122,10 +147,14 @@ async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await stop(update,context)
     await find(update,context)
 
-# RELAY MESSAGES
+# RELAY
 async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
+
+    if user in editing:
+        await save_profile(update,context)
+        return
 
     if user in active:
 
@@ -137,20 +166,21 @@ async def relay(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_id=update.message.message_id
         )
 
-# ADMIN STATS
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    users = cursor.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+# VIP
+async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-f"""📊 Bot Stats
+"""💎 VIP
 
-Users: {users}
-Waiting: {len(waiting)}
-Active chats: {len(active)//2}
+1 Month – ₹49
+3 Months – ₹99
+Lifetime – ₹299
+
+UPI:
+hatmahendran267r@ybl
+
+Send screenshot to:
+@Elentraadmin001
 """
 )
 
@@ -165,6 +195,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "👤 Profile":
         await profile(update,context)
 
+    elif text == "✏️ Edit Profile":
+        await edit_profile(update,context)
+
     elif text == "💎 VIP":
         await vip(update,context)
 
@@ -173,11 +206,10 @@ app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("next", next_chat))
 app.add_handler(CommandHandler("stop", stop))
-app.add_handler(CommandHandler("stats", stats))
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, buttons))
 app.add_handler(MessageHandler(filters.ALL, relay))
 
-print("ElentraChat running")
+print("Bot running")
 
 app.run_polling()
