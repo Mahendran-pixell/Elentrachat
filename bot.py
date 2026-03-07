@@ -5,7 +5,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 
 TOKEN="8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
 ADMIN_ID=8232389772
-BOT_USERNAME="ElentraChatBot"
 
 db=sqlite3.connect("users.db",check_same_thread=False)
 cursor=db.cursor()
@@ -19,9 +18,7 @@ gender TEXT,
 pref TEXT DEFAULT 'Any',
 vip INTEGER DEFAULT 0,
 daily INTEGER DEFAULT 0,
-reset_time INTEGER DEFAULT 0,
-invites INTEGER DEFAULT 0,
-coins INTEGER DEFAULT 0
+reset_time INTEGER DEFAULT 0
 )
 """)
 
@@ -31,14 +28,12 @@ waiting=[]
 active={}
 editing={}
 pref_edit={}
-last_msg={}
 
 menu=ReplyKeyboardMarkup([
 ["🔎 Find Partner"],
 ["👤 Profile","✏ Edit Profile"],
-["🎯 Partner Gender","🎁 Invite Friends"],
-["🏆 Leaderboard","🎁 Daily Reward"],
-["🚨 Report","💎 VIP"],
+["🎯 Partner Gender"],
+["💎 VIP"],
 ["⏭ Next","⛔ Stop"]
 ],resize_keyboard=True)
 
@@ -54,7 +49,7 @@ def reset_daily(uid):
 
     now=int(time.time())
 
-    if now-data[0] > 86400:
+    if now-data[0]>86400:
 
         cursor.execute(
         "UPDATE users SET daily=0,reset_time=? WHERE user_id=?",
@@ -74,21 +69,8 @@ async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     db.commit()
 
-    if context.args:
-
-        ref=int(context.args[0])
-
-        if ref!=uid:
-
-            cursor.execute(
-            "UPDATE users SET invites=invites+1 WHERE user_id=?",
-            (ref,)
-            )
-
-            db.commit()
-
     await update.message.reply_text(
-"👋 Welcome to ElentraChat",
+"👋 Welcome to ElentraChat\n\nAnonymous random chat bot.",
 reply_markup=menu
 )
 
@@ -96,35 +78,31 @@ async def profile(update:Update):
 
     uid=update.effective_user.id
 
-    d=cursor.execute(
-    "SELECT name,age,gender,pref,vip,invites,coins FROM users WHERE user_id=?",
+    data=cursor.execute(
+    "SELECT name,age,gender,pref,vip FROM users WHERE user_id=?",
     (uid,)
     ).fetchone()
 
     await update.message.reply_text(f"""
 👤 Profile
 
-Name: {d[0]}
-Age: {d[1]}
-Gender: {d[2]}
-Looking for: {d[3]}
+Name: {data[0]}
+Age: {data[1]}
+Gender: {data[2]}
+Looking for: {data[3]}
 
-VIP: {"Yes" if d[4] else "No"}
-Invites: {d[5]}
-Coins: {d[6]}
-
-ID: {uid}
+VIP: {"Yes" if data[4] else "No"}
 """)
 
-async def edit(update:Update):
+async def edit_profile(update:Update):
 
     editing[update.effective_user.id]=True
 
     await update.message.reply_text(
-"Send profile:\nName,Age,Gender\nExample:\nAlex,18,Male"
+"Send profile like:\nName,Age,Gender\nExample:\nAlex,18,Male"
 )
 
-async def partner(update:Update):
+async def partner_gender(update:Update):
 
     pref_edit[update.effective_user.id]=True
 
@@ -132,7 +110,7 @@ async def partner(update:Update):
 "Choose partner gender:\nMale / Female / Any"
 )
 
-def find_match(uid):
+def match_user(uid):
 
     my=cursor.execute(
     "SELECT gender,pref FROM users WHERE user_id=?",
@@ -159,20 +137,20 @@ async def find(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     reset_daily(uid)
 
-    d=cursor.execute(
+    data=cursor.execute(
     "SELECT daily,vip FROM users WHERE user_id=?",
     (uid,)
     ).fetchone()
 
-    if not d[1] and d[0]>=50:
+    if not data[1] and data[0]>=50:
 
         await update.message.reply_text(
-"⚠ 50 chats limit reached today"
+"⚠ Daily limit reached (50 chats)"
         )
 
         return
 
-    partner=find_match(uid)
+    partner=match_user(uid)
 
     if partner:
 
@@ -186,16 +164,14 @@ async def find(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
         db.commit()
 
-        await context.bot.send_message(uid,"✅ Connected")
-        await context.bot.send_message(partner,"✅ Connected")
+        await context.bot.send_message(uid,"✅ Connected! Say hi 👋")
+        await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
 
     else:
 
         waiting.append(uid)
 
-        await update.message.reply_text(
-f"🔎 Searching...\n👥 Online: {len(waiting)+len(active)}"
-        )
+        await update.message.reply_text("🔎 Searching for partner...")
 
 async def stop(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
@@ -208,57 +184,26 @@ async def stop(update:Update,context:ContextTypes.DEFAULT_TYPE):
         del active[uid]
         del active[p]
 
-        await context.bot.send_message(p,"Partner left")
+        await context.bot.send_message(p,"❌ Partner left chat")
+
+        await update.message.reply_text("Chat ended")
 
 async def next_chat(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
     await stop(update,context)
     await find(update,context)
 
-async def invite(update:Update):
-
-    uid=update.effective_user.id
-
-    link=f"https://t.me/{BOT_USERNAME}?start={uid}"
-
-    await update.message.reply_text(
-f"Invite friends:\n{link}"
-)
-
-async def leaderboard(update:Update):
-
-    rows=cursor.execute(
-    "SELECT user_id,invites FROM users ORDER BY invites DESC LIMIT 5"
-    ).fetchall()
-
-    text="🏆 Top Inviters\n\n"
-
-    for i,r in enumerate(rows):
-
-        text+=f"{i+1}. {r[0]} — {r[1]}\n"
-
-    await update.message.reply_text(text)
-
-async def reward(update:Update):
-
-    uid=update.effective_user.id
-
-    cursor.execute(
-    "UPDATE users SET coins=coins+5 WHERE user_id=?",
-    (uid,)
-    )
-
-    db.commit()
-
-    await update.message.reply_text("🎁 +5 coins")
-
 async def vip(update:Update):
 
     await update.message.reply_text("""
-💎 VIP
+💎 VIP Membership
 
-Unlimited chats
-Gender search
+Benefits:
+• Unlimited chats
+• Gender filter
+
+Price:
+₹49
 
 UPI:
 hatmahendran267r@ybl
@@ -267,18 +212,21 @@ Send screenshot to:
 @Elentraadmin001
 """)
 
-async def report(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def addvip(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
-    uid=update.effective_user.id
+    if update.effective_user.id!=ADMIN_ID:
+        return
 
-    if uid in active:
+    uid=int(context.args[0])
 
-        p=active[uid]
+    cursor.execute(
+    "UPDATE users SET vip=1 WHERE user_id=?",
+    (uid,)
+    )
 
-        await context.bot.send_message(
-        ADMIN_ID,
-        f"🚨 Report\nReporter:{uid}\nPartner:{p}"
-        )
+    db.commit()
+
+    await update.message.reply_text("VIP activated")
 
 async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
@@ -289,11 +237,11 @@ async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
         try:
 
-            n,a,g=text.split(",")
+            name,age,gender=text.split(",")
 
             cursor.execute(
             "UPDATE users SET name=?,age=?,gender=? WHERE user_id=?",
-            (n,a,g,uid)
+            (name.strip(),age.strip(),gender.strip(),uid)
             )
 
             db.commit()
@@ -319,16 +267,14 @@ async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
         pref_edit.pop(uid)
 
-        await update.message.reply_text("Preference saved")
+        await update.message.reply_text(
+        "Preference saved",
+        reply_markup=menu
+        )
 
         return
 
     if uid in active:
-
-        if time.time()-last_msg.get(uid,0)<1:
-            return
-
-        last_msg[uid]=time.time()
 
         p=active[uid]
 
@@ -347,22 +293,10 @@ async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
         await profile(update)
 
     elif text=="✏ Edit Profile":
-        await edit(update)
+        await edit_profile(update)
 
     elif text=="🎯 Partner Gender":
-        await partner(update)
-
-    elif text=="🎁 Invite Friends":
-        await invite(update)
-
-    elif text=="🏆 Leaderboard":
-        await leaderboard(update)
-
-    elif text=="🎁 Daily Reward":
-        await reward(update)
-
-    elif text=="🚨 Report":
-        await report(update,context)
+        await partner_gender(update)
 
     elif text=="💎 VIP":
         await vip(update)
@@ -376,8 +310,10 @@ async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
 app=ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start",start))
+app.add_handler(CommandHandler("addvip",addvip))
+
 app.add_handler(MessageHandler(filters.ALL,handler))
 
-print("ElentraChat V3 running")
+print("ElentraChat Basic running")
 
 app.run_polling()
