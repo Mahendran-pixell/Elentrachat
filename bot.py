@@ -1,12 +1,11 @@
-import sqlite3
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
 
 TOKEN = "8637048210:AAHxkLGOHMQfUEjeGqUuLRD2hK11-GKQwGk"
 ADMIN_ID = 8232389772
 
-waiting = []
-active = {}
+waiting_users = []
+active_chats = {}
 
 menu = ReplyKeyboardMarkup(
 [
@@ -17,97 +16,95 @@ menu = ReplyKeyboardMarkup(
 resize_keyboard=True
 )
 
-async def start(update:Update,context:ContextTypes.DEFAULT_TYPE):
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to ElentraChat\nAnonymous random chat.",
         reply_markup=menu
     )
 
 
-def match(user):
+def find_partner(user):
 
-    for u in waiting:
-
+    for u in waiting_users:
         if u != user:
-
-            waiting.remove(u)
+            waiting_users.remove(u)
             return u
 
     return None
 
 
-async def find(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
-    if user in active:
+    if user in active_chats:
         await update.message.reply_text("You are already chatting.")
         return
 
-    partner = match(user)
+    partner = find_partner(user)
 
     if partner:
 
-        active[user] = partner
-        active[partner] = user
+        active_chats[user] = partner
+        active_chats[partner] = user
 
         await context.bot.send_message(user,"✅ Connected! Say hi 👋")
         await context.bot.send_message(partner,"✅ Connected! Say hi 👋")
 
     else:
 
-        if user not in waiting:
-            waiting.append(user)
+        if user not in waiting_users:
+            waiting_users.append(user)
 
         await update.message.reply_text("🔎 Searching for stranger...")
 
 
-async def stop(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
-    if user in waiting:
-        waiting.remove(user)
+    if user in waiting_users:
+        waiting_users.remove(user)
 
-    if user not in active:
+    if user not in active_chats:
         await update.message.reply_text("You are not in a chat.")
         return
 
-    partner = active[user]
+    partner = active_chats[user]
 
-    del active[user]
-    del active[partner]
+    del active_chats[user]
+    del active_chats[partner]
 
     await context.bot.send_message(partner,"❌ Partner left chat")
     await update.message.reply_text("Chat ended.")
 
 
-async def next_chat(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
-    if user in active:
+    if user in active_chats:
 
-        partner = active[user]
+        partner = active_chats[user]
 
-        del active[user]
-        del active[partner]
+        del active_chats[user]
+        del active_chats[partner]
 
         await context.bot.send_message(partner,"❌ Partner skipped")
 
     await find(update,context)
 
 
-async def report(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
 
-    if user not in active:
+    if user not in active_chats:
         await update.message.reply_text("No partner to report.")
         return
 
-    partner = active[user]
+    partner = active_chats[user]
 
     await context.bot.send_message(
         ADMIN_ID,
@@ -117,12 +114,12 @@ async def report(update:Update,context:ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Report sent to admin.")
 
 
-async def terms(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
 """📜 Terms & Conditions
 
-• Be respectful
+• Respect users
 • No harassment
 • No illegal content
 • Violators will be banned
@@ -130,14 +127,14 @@ async def terms(update:Update,context:ContextTypes.DEFAULT_TYPE):
 )
 
 
-async def handler(update:Update,context:ContextTypes.DEFAULT_TYPE):
+async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user.id
     text = update.message.text
 
-    if user in active:
+    if user in active_chats:
 
-        partner = active[user]
+        partner = active_chats[user]
 
         await context.bot.copy_message(
             chat_id=partner,
@@ -169,6 +166,6 @@ app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start",start))
 app.add_handler(MessageHandler(filters.TEXT,handler))
 
-print("ElentraChat Core Running")
+print("ElentraChat Running")
 
 app.run_polling()
